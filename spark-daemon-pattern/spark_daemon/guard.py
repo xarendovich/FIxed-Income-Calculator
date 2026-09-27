@@ -17,6 +17,7 @@ import shutil
 import socket
 import stat
 import sys
+import types
 
 from . import KNOWN_OUTPUT_ENTRIES, QUARANTINE_DIR, TMP_DIR, TMP_PREFIX
 from .paths import expand, within
@@ -53,19 +54,36 @@ _PATH_MUTATIONS = frozenset({
 
 
 class Policy:
-    """What one daemon may read, write and run, derived from its manifest."""
+    """What one daemon may read, write and run, derived from its manifest.
+
+    Immutable once built: the audit hook and ctx both consult it, so a daemon that reached
+    it (purity.py forbids private attributes, which is the only route) still could not widen
+    its own bounds. The hook additionally captures its own copies at install time."""
+
+    __slots__ = ("output_dir", "reads", "deny", "commands", "notify_target")
 
     def __init__(self, manifest, notify_socket=None):
-        self.output_dir = expand(manifest.output_dir)
-        self.reads = tuple(expand(p) for p in manifest.reads)
-        self.deny = tuple(expand(p) for p in manifest.all_deny)
-        self.commands = {}
+        commands = {}
         for name in manifest.commands:
             found = shutil.which(name, path="/usr/bin:/bin")
             if found:
-                self.commands[name] = os.path.realpath(found)
-        self.notify_target = _notify_target(notify_socket if notify_socket is not None
-                                            else os.environ.get("NOTIFY_SOCKET"))
+                commands[name] = os.path.realpath(found)
+        values = {
+            "output_dir": expand(manifest.output_dir),
+            "reads": tuple(expand(p) for p in manifest.reads),
+            "deny": tuple(expand(p) for p in manifest.all_deny),
+            "commands": types.MappingProxyType(commands),
+            "notify_target": _notify_target(notify_socket if notify_socket is not None
+                                            else os.environ.get("NOTIFY_SOCKET")),
+        }
+        for key, value in values.items():
+            object.__setattr__(self, key, value)
+
+    def __setattr__(self, name, value):
+        raise AttributeError("Policy is immutable")
+
+    def __delattr__(self, name):
+        raise AttributeError("Policy is immutable")
 
     def denied(self, full: str) -> bool:
         return any(within(full, d) for d in self.deny)
@@ -94,6 +112,12 @@ def _notify_target(address):
 def _count(kind):
     VIOLATIONS["count"] += 1
     VIOLATIONS["last"] = kind
+
+
+def count_violation(kind: str) -> None:
+    """Record a violation detected outside the audit hook (for example a ctx request for a
+    command the manifest does not name). The runtime fails closed on it after the cycle."""
+    _count(kind)
 
 
 def prepare_output_dir(path: str) -> None:
@@ -144,6 +168,14 @@ def install_audit_hook(policy: Policy, mode: str = "enforce") -> None:
         raise ValueError("mode must be 'enforce' or 'record'")
     allowed_exec = frozenset(policy.commands.values())
     notify = policy.notify_target
+    deny = tuple(policy.deny)
+    output_dir = policy.output_dir
+
+    def denied(full):
+        return any(within(full, d) for d in deny)
+
+    def writable(full):
+        return within(full, output_dir) and not denied(full)
 
     def violation(kind, detail=""):
         _count(kind)
@@ -168,13 +200,13 @@ def install_audit_hook(policy: Policy, mode: str = "enforce") -> None:
                 return
             writing = bool((flags or 0) & _WRITE_FLAGS) or bool(
                 mode_arg and any(ch in str(mode_arg) for ch in "wax+"))
-            if policy.denied(full):
+            if denied(full):
                 violation("open-denied-path", full)
-            elif writing and full not in _ALLOWED_DEVICES and not policy.writable(full):
+            elif writing and full not in _ALLOWED_DEVICES and not writable(full):
                 violation("write-outside-output-dir", full)
         elif event in ("os.listdir", "os.scandir"):
             full = as_path(args[0] if args else ".")
-            if full is not None and policy.denied(full):
+            if full is not None and denied(full):
                 violation("list-denied-path", full)
         elif event == "subprocess.Popen":
             executable, argv = args[0], args[1]
@@ -199,14 +231,14 @@ def install_audit_hook(policy: Policy, mode: str = "enforce") -> None:
             if isinstance(target, int):               # fd-based: the fd was already checked at open
                 return
             full = as_path(target)
-            if full is None or not policy.writable(full):
+            if full is None or not writable(full):
                 violation(f"{event}-outside-output-dir", full)
         elif event in ("os.rename", "shutil.move", "shutil.copyfile", "shutil.copytree"):
             dst = as_path(args[1]) if len(args) > 1 else None
             src = as_path(args[0]) if args else None
-            if dst is None or not policy.writable(dst):
+            if dst is None or not writable(dst):
                 violation(f"{event}-outside-output-dir", dst)
-            elif event in ("os.rename", "shutil.move") and (src is None or not policy.writable(src)):
+            elif event in ("os.rename", "shutil.move") and (src is None or not writable(src)):
                 violation(f"{event}-source-outside-output-dir", src)
 
     sys.addaudithook(hook)

@@ -129,11 +129,22 @@ def render_digest(daemon: str, stamp: dict, sections, max_bytes: int) -> bytes:
         return ("\n".join(lines)).encode("utf-8")
 
     total_rows = sum(len(rows) for _, rows in sections)
-    for limit in range(total_rows, -1, -1):
-        data = build(limit)
-        if len(data) <= max_bytes:
-            return data
-    raise RenderError("digest header alone exceeds max_bytes")
+    data = build(total_rows)
+    if len(data) <= max_bytes:
+        return data
+    # Size grows with the number of rows kept, so binary-search the largest limit that fits
+    # (r3: was a linear scan from the top, quadratic in the number of rows).
+    low, high, best = 0, total_rows - 1, None
+    while low <= high:
+        mid = (low + high) // 2
+        candidate = build(mid)
+        if len(candidate) <= max_bytes:
+            best, low = candidate, mid + 1
+        else:
+            high = mid - 1
+    if best is None:
+        raise RenderError("digest header alone exceeds max_bytes")
+    return best
 
 
 def _hex(value) -> str:

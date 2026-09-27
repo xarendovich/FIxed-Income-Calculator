@@ -11,7 +11,7 @@ import stat as stat_mod
 from dataclasses import dataclass
 
 from . import proc
-from .guard import GuardError
+from .guard import GuardError, count_violation
 
 
 class Missing(Exception):
@@ -44,6 +44,15 @@ class DiskUsage:
 class Listing:
     names: tuple
     truncated: bool
+
+
+def _str_list(value, label) -> list:
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)):
+        raise NotAllowed(f"{label} must be a list of strings")
+    out = list(value)
+    if not all(isinstance(v, str) and "\0" not in v for v in out):
+        raise NotAllowed(f"{label} must be a list of strings")
+    return out
 
 
 def utc_now() -> str:
@@ -113,18 +122,29 @@ class Context:
         return DiskUsage(v.f_blocks * v.f_frsize, v.f_bfree * v.f_frsize, v.f_bavail * v.f_frsize)
 
     def run(self, argv, max_bytes: int = 65536) -> proc.RunResult:
+        """Run one of the manifest's commands (argv list, never a shell). Git is refused
+        here: it must go through ctx.git(), which enforces the read-only subcommand and
+        option rules."""
+        argv = _str_list(argv, "argv")
+        if argv and argv[0] == "git":
+            count_violation("run-git-outside-ctx-git")
+            raise NotAllowed("use ctx.git() for Git")
         try:
-            return proc.run(list(argv), executables=self._policy.commands, timeout=self._timeout,
+            return proc.run(argv, executables=self._policy.commands, timeout=self._timeout,
                             max_bytes=max_bytes)
         except proc.CommandNotAllowed as e:
+            count_violation("command-not-allowed")
             raise NotAllowed(str(e)) from None
 
     def git(self, repo: str, args, max_bytes: int = 65536, index_copy: bool = False) -> proc.RunResult:
+        """Run a read-only Git subcommand (proc.GIT_SUBCOMMANDS) in a declared repository."""
         full = self._resolve(repo)
+        args = _str_list(args, "args")
         try:
-            return proc.git(full, list(args), executables=self._policy.commands, timeout=self._timeout,
-                            max_bytes=max_bytes, tmp_dir=self._tmp, index_copy=index_copy)
+            return proc.git(full, args, executables=self._policy.commands, timeout=self._timeout,
+                            max_bytes=max_bytes, tmp_dir=self._tmp, index_copy=bool(index_copy))
         except proc.CommandNotAllowed as e:
+            count_violation("git-not-allowed")
             raise NotAllowed(str(e)) from None
 
     GIT_DIFF_FLAGS = proc.GIT_DIFF_FLAGS

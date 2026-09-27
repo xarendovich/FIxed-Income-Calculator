@@ -22,6 +22,7 @@ PATH_RE = re.compile(r"^(~|~/[A-Za-z0-9._/-]*|/[A-Za-z0-9._/-]*)$")
 COMMAND_RE = re.compile(r"^[a-z][a-z0-9._-]{0,31}$")
 USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 PURPOSE_RE = re.compile(r"^[A-Za-z0-9 .,;:()/'+-]{10,200}$")
+MANIFEST_MAX_BYTES = 65536
 
 # Always denied, for reading and writing, whatever the manifest says (never removable).
 BASE_DENY = (
@@ -34,14 +35,59 @@ BASE_DENY = (
 )
 # An output directory may not sit inside any of these.
 FORBIDDEN_OUTPUT_ROOTS = ("~/spark-core", "~/spark-governance") + BASE_DENY[2:]
-# Shells, interpreters, network clients and privilege tools are never runnable.
+# Shells, interpreters, network clients, privilege tools, command runners and file
+# mutators are never runnable. Names that run other programs (env, xargs, nice, timeout,
+# tar --to-command, less !cmd, ...) count as shells: any one of them turns a manifest's
+# command list into "run anything".
 FORBIDDEN_COMMANDS = frozenset({
-    "sh", "bash", "dash", "zsh", "ksh", "fish", "env", "xargs", "find", "awk", "sed", "perl",
-    "python", "python3", "node", "ruby", "sudo", "su", "doas", "pkexec", "ssh", "scp", "sftp",
-    "rsync", "curl", "wget", "nc", "ncat", "socat", "telnet", "ftp", "docker", "podman",
-    "systemctl", "systemd-run", "loginctl", "mount", "umount", "chmod", "chown", "rm", "mv",
-    "cp", "dd", "tee", "sqlite3", "crontab", "at",
+    # shells and command runners
+    "sh", "bash", "dash", "zsh", "ksh", "mksh", "csh", "tcsh", "fish", "ash", "busybox",
+    "toybox", "env", "xargs", "find", "nice", "ionice", "nohup", "timeout", "stdbuf", "setsid",
+    "watch", "script", "expect", "chroot", "unshare", "nsenter", "flock", "parallel", "make",
+    # text tools that can execute or write files
+    "awk", "gawk", "mawk", "nawk", "sed", "ed", "ex", "vi", "vim", "nvim", "nano", "emacs",
+    "less", "more", "man", "tar", "zip", "unzip", "patch", "split", "csplit",
+    # interpreters and compilers (see also FORBIDDEN_COMMAND_PREFIXES)
+    "gcc", "cc", "clang", "ld", "gdb", "strace", "ltrace", "java", "tclsh", "wish", "irb",
+    "pip", "pip3", "npm", "npx", "deno", "bun", "pwsh",
+    # privilege and identity
+    "sudo", "su", "doas", "pkexec", "runuser", "setpriv", "capsh",
+    # network
+    "ssh", "scp", "sftp", "rsync", "curl", "wget", "nc", "ncat", "netcat", "socat", "telnet",
+    "ftp", "openssl", "gpg", "gpg2", "ip", "iptables", "nft", "nmcli", "busctl", "dbus-send",
+    # services, containers, scheduling, processes
+    "docker", "podman", "systemctl", "systemd-run", "loginctl", "crontab", "at", "batch",
+    "kill", "pkill", "killall", "shutdown", "reboot", "halt", "poweroff",
+    # file mutation
+    "mount", "umount", "chmod", "chown", "chgrp", "rm", "rmdir", "mv", "cp", "ln", "dd", "tee",
+    "touch", "truncate", "shred", "install", "mkdir", "mkfifo", "mknod", "sqlite3",
 })
+# Any command whose name starts with one of these is an interpreter family (python3.12,
+# perl5.38, node18, ruby3.2, php8.3, lua5.4, pypy3, ...). Refused like the names above.
+FORBIDDEN_COMMAND_PREFIXES = ("python", "pypy", "perl", "node", "ruby", "php", "lua", "tcl",
+                              "java", "busybox")
+
+
+def command_refusal(cmd: str):
+    """Why a bare command name is never allowed, or None if it may be declared."""
+    if cmd in FORBIDDEN_COMMANDS or cmd.startswith(FORBIDDEN_COMMAND_PREFIXES):
+        return f"{cmd!r} is never allowed (shell, interpreter, network, privilege or file-mutation tool)"
+    return None
+
+
+def path_refusal(path: str):
+    """Why a manifest path is refused beyond PATH_RE, or None. "." and ".." segments, empty
+    segments and trailing slashes are refused so that the path a reviewer reads is the path
+    the skeleton enforces (the validator still resolves symlinks before comparing)."""
+    body = path[2:] if path.startswith("~/") else path.lstrip("/")
+    if path in ("~", "/"):
+        return None
+    if path.endswith("/") or "//" in path:
+        return "must not end with '/' or contain '//'"
+    if any(seg in (".", "..") for seg in body.split("/")):
+        return "must not contain '.' or '..' segments"
+    return None
+
 
 TOP_KEYS = {
     "manifest_schema", "name", "version", "purpose", "daemon_class", "trigger", "reads",
@@ -168,6 +214,9 @@ class _Checker:
         for i, item in enumerate(value):
             p = self.text(f"{where}[{i}]", item, PATH_RE,
                           "must be an absolute or ~/ path of letters, digits and ._/-")
+            if p is not None and path_refusal(p):
+                self.fail(f"{where}[{i}]", path_refusal(p))
+                p = None
             if p is not None:
                 if p in out:
                     self.fail(f"{where}[{i}]", "duplicate path")
@@ -212,8 +261,8 @@ def parse(data: dict, path: str = "<memory>") -> Manifest:
             name_ok = c.text(f"commands[{i}]", cmd, COMMAND_RE, "must be a bare command name")
             if name_ok is None:
                 continue
-            if cmd in FORBIDDEN_COMMANDS:
-                c.fail(f"commands[{i}]", f"{cmd!r} is never allowed (shell, interpreter, network or privilege tool)")
+            if command_refusal(cmd):
+                c.fail(f"commands[{i}]", command_refusal(cmd))
             elif cmd in seen:
                 c.fail(f"commands[{i}]", "duplicate command")
             else:
@@ -222,6 +271,9 @@ def parse(data: dict, path: str = "<memory>") -> Manifest:
 
     output_dir = c.text("output_dir", data.get("output_dir"), PATH_RE,
                         "must be an absolute or ~/ path of letters, digits and ._/-")
+    if output_dir is not None and path_refusal(output_dir):
+        c.fail("output_dir", path_refusal(output_dir))
+        output_dir = None
 
     network_mode = None
     n = data.get("network")
@@ -293,12 +345,17 @@ def parse(data: dict, path: str = "<memory>") -> Manifest:
         if isinstance(enabled, bool) and dmax:
             digest = DigestSpec(enabled, dmax)
 
-    # Relations between paths, checked on expanded paths.
-    if output_dir and reads:
+    # Relations between paths, checked on expanded paths. The output directory is the one
+    # place a daemon may write, and every access right on it is granted to the process
+    # (Landlock, ReadWritePaths=), so it must neither sit inside nor contain a protected tree.
+    if output_dir:
         out = expand(output_dir)
-        for root in FORBIDDEN_OUTPUT_ROOTS:
-            if within(out, expand(root)):
+        for root in FORBIDDEN_OUTPUT_ROOTS + deny:
+            full_root = expand(root)
+            if within(out, full_root):
                 c.fail("output_dir", f"must not be inside {root}")
+            elif within(full_root, out):
+                c.fail("output_dir", f"must not contain the protected path {root}")
         for p in reads:
             rp = expand(p)
             if within(out, rp) or within(rp, out):
@@ -327,22 +384,32 @@ def parse(data: dict, path: str = "<memory>") -> Manifest:
 
 def load(path: str) -> Manifest:
     try:
-        with open(path, "rb") as fh:
-            raw = fh.read(65537)
-    except OSError as e:
-        raise ManifestError([f"manifest: cannot read {path}: {e.strerror}"]) from None
-    if len(raw) > 65536:
-        raise ManifestError(["manifest: larger than 64 KiB"])
-    try:
-        data = strict_loads(raw)
+        data = strict_loads(_read_bounded(path))
     except (UnicodeDecodeError, ValueError) as e:
         raise ManifestError([f"manifest: not valid strict JSON ({type(e).__name__})"]) from None
     return parse(data, path)
 
 
+def _read_bounded(path: str) -> bytes:
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read(MANIFEST_MAX_BYTES + 1)
+    except OSError as e:
+        raise ManifestError([f"manifest: cannot read {path}: {e.strerror}"]) from None
+    if len(raw) > MANIFEST_MAX_BYTES:
+        raise ManifestError(["manifest: larger than 64 KiB"])
+    return raw
+
+
 def to_dict(path: str) -> dict:
-    with open(path, "rb") as fh:
-        return strict_loads(fh.read())
+    """The raw manifest object (strict JSON, bounded), without schema validation."""
+    try:
+        data = strict_loads(_read_bounded(path))
+    except (UnicodeDecodeError, ValueError) as e:
+        raise ManifestError([f"manifest: not valid strict JSON ({type(e).__name__})"]) from None
+    if not isinstance(data, dict):
+        raise ManifestError(["manifest: must be an object"])
+    return data
 
 
 def dump(data: dict, path: str) -> None:

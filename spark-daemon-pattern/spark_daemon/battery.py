@@ -537,8 +537,43 @@ def db15(ws, c, threshold):
         c.state, c.evidence = "UNKNOWN", f"systemd-analyze gave no score (exit {p.code})"
         return
     score = match.group(1)
-    c.state = "PASS" if p.code == 0 else "FAIL"
-    c.evidence = f"all required directives present; systemd-analyze offline exposure {score} (threshold {threshold / 10:.1f})"
+    blocked = _startup_syscalls_blocked(analyze, text)
+    if blocked is None:
+        c.state = "UNKNOWN"
+        c.evidence = f"exposure {score}; could not expand the unit's SystemCallFilter groups"
+        return
+    c.state = "PASS" if p.code == 0 and not blocked else "FAIL"
+    c.evidence = (f"all required directives present; systemd-analyze offline exposure {score} "
+                  f"(threshold {threshold / 10:.1f}); start-up syscalls "
+                  + (f"BLOCKED by the unit's seccomp filter: {', '.join(blocked)}" if blocked
+                     else "permitted by the unit's seccomp filter"))
+
+
+def _startup_syscalls_blocked(analyze, unit_text):
+    """Start-up syscalls the unit's SystemCallFilter would refuse, or None if the groups
+    could not be expanded. (r3: catches the missing @sandbox/Landlock allowance.)"""
+    cache = {}
+
+    def expand_group(group):
+        if group not in cache:
+            env = dict(os.environ, SYSTEMD_COLORS="0", NO_COLOR="1")
+            p = run_proc([analyze, "syscall-filter", group], env, timeout=30)
+            if p.code != 0:
+                raise LookupError(group)
+            names = set()
+            for line in p.stdout.splitlines():
+                item = re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
+                if not item or item.startswith("#") or item == group:
+                    continue
+                names.update(expand_group(item) if item.startswith("@") else {item})
+            cache[group] = names
+        return cache[group]
+
+    try:
+        allowed, denied = unitgen.resolve_syscall_filter(unit_text, expand_group)
+    except LookupError:
+        return None
+    return [s for s in unitgen.STARTUP_SYSCALLS if s not in allowed or s in denied]
 
 
 def db16(ws, c):
@@ -624,7 +659,18 @@ def main(manifest_path: str, *, seed: int, quick: bool, workdir: str | None, thr
     if not os.path.exists(manifest_path):
         print(f"no manifest at {manifest_path}")
         return EXIT_USAGE
-    ws = Workspace(manifest_path, workdir)
+    daemon_path = os.path.join(os.path.dirname(os.path.abspath(manifest_path)), "daemon.py")
+    if not os.path.isfile(daemon_path):
+        print(f"no daemon.py beside {manifest_path}")
+        print("RESULT: FAIL")
+        return EXIT_FAILED
+    try:
+        ws = Workspace(manifest_path, workdir)
+    except manifest_mod.ManifestError as e:
+        for problem in e.problems:
+            print(f"manifest: {problem}")
+        print("RESULT: FAIL")
+        return EXIT_FAILED
     rng = random.Random(seed)
     checks = [Check(f"DB-{i:02d}", t) for i, t in enumerate([
         "manifest validates", "purity check", "confinement", "ledger integrity and provenance",

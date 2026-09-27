@@ -74,10 +74,14 @@ def main(argv=None) -> int:
                 print(f"manifest: {problem}", file=sys.stderr)
             return EXIT_USAGE
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        if args.plan:
-            print(unitgen.install_plan(m, root=root, python=args.python))
-        else:
-            print(unitgen.generate(m, root=root, python=args.python), end="")
+        try:
+            if args.plan:
+                print(unitgen.install_plan(m, root=root, python=args.python))
+            else:
+                print(unitgen.generate(m, root=root, python=args.python), end="")
+        except unitgen.UnitError as e:
+            print(f"unit: {e}", file=sys.stderr)
+            return EXIT_USAGE
         return EXIT_OK
 
     if args.command == "run":
@@ -87,7 +91,13 @@ def main(argv=None) -> int:
     if args.command == "verify":
         from . import LEDGER_NAME, ledger, manifest
         from .paths import expand
-        m = manifest.load(args.manifest)
+        try:
+            m = manifest.load(args.manifest)
+        except manifest.ManifestError as e:
+            for problem in e.problems:
+                print(f"manifest: {problem}")
+            print("RESULT: FAIL")
+            return EXIT_FAILED
         path = os.path.join(expand(m.output_dir), LEDGER_NAME)
         try:
             result = ledger.verify_file(path, m.name, m.ledger.record_max_bytes)

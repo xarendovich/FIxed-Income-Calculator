@@ -36,6 +36,37 @@ GIT_BASE = ("--no-pager", "-c", "color.ui=never", "-c", "core.fsmonitor=false",
 # Diff-producing Git calls additionally (v0.3 section 3.8; script-board F3).
 GIT_DIFF_FLAGS = ("--no-ext-diff", "--no-textconv", "--no-renames", "--no-color")
 
+# Read-only subcommands ctx.git() accepts as its first argument. Anything that can write a
+# ref, the index or the worktree, fetch, or run hooks is absent. The daemon's arguments can
+# therefore never be Git *global* options (-c, --git-dir, --exec-path, ...): the subcommand
+# always comes first, so `-c alias.x=!cmd` style injection is impossible.
+GIT_SUBCOMMANDS = frozenset({
+    "log", "show", "diff", "status", "rev-parse", "rev-list", "ls-files", "ls-tree",
+    "cat-file", "for-each-ref", "show-ref", "describe", "merge-base", "name-rev", "diff-tree",
+    "diff-index", "diff-files", "count-objects", "shortlog", "blame",
+})
+# Subcommands that produce diffs get "--no-ext-diff --no-textconv" inserted by the skeleton,
+# so a repository's own config (diff.external, textconv drivers) never runs a program.
+GIT_DIFF_SUBCOMMANDS = frozenset({"log", "show", "diff", "diff-tree", "diff-index", "diff-files"})
+# Long options refused anywhere before a "--" separator: they write files, read files
+# outside the repository, run programs (external diff, textconv, gpg for signatures) or
+# fetch from elsewhere. (Global options such as -c, --git-dir and --exec-path cannot appear:
+# the subcommand is always first, and after it they are either query flags, as in
+# `rev-parse --git-dir`, or unknown options.) Git accepts any unambiguous abbreviation of a long
+# option (--outp=x means --output=x), so an argument is refused when it is a prefix of one
+# of these, as well as when it starts with one.
+GIT_REFUSED_OPTIONS = (
+    "--output", "--no-index", "--ext-diff", "--textconv", "--exec", "--upload-pack",
+    "--receive-pack",
+    "--contents", "--ignore-revs-file", "--exclude-from", "--exclude-per-directory",
+    "--pathspec-from-file", "--open-files-in-pager", "--orderfile", "--mailmap-file",
+    "--show-signature", "--verify-signatures", "--stdin", "--batch", "--filters",
+)
+# Short options refused per subcommand (they read a file named by the daemon).
+GIT_REFUSED_SHORT = {"diff": ("-O",), "log": ("-O",), "show": ("-O",), "diff-tree": ("-O",),
+                     "diff-index": ("-O",), "diff-files": ("-O",), "blame": ("-S",),
+                     "ls-files": ("-X",)}
+
 
 class CommandNotAllowed(Exception):
     pass
@@ -103,10 +134,50 @@ def _kill_group(proc):
         pass
 
 
+def git_refusal(args):
+    """Why ctx.git() refuses this argument list, or None if it is allowed.
+
+    Arguments are also refused when they name a path outside the repository (absolute, or
+    with a ".." segment): outside a repository `git diff a b` silently becomes --no-index
+    and would read arbitrary files."""
+    if not args:
+        return "a Git subcommand is required"
+    sub = args[0]
+    if sub not in GIT_SUBCOMMANDS:
+        return f"Git subcommand {sub!r} is not in the read-only allowlist"
+    options_done = False
+    for arg in args[1:]:
+        if arg.startswith("/") or ".." in arg.split("/") or arg.startswith("~"):
+            return "Git arguments must not name paths outside the repository"
+        if options_done:
+            continue
+        if arg == "--":
+            options_done = True
+            continue
+        if arg.startswith("--"):
+            name = arg.split("=", 1)[0]
+            for refused in GIT_REFUSED_OPTIONS:
+                if name.startswith(refused) or (len(name) > 3 and refused.startswith(name)):
+                    return f"Git option {refused!r} is not allowed"
+            if name in ("--format", "--pretty") and "%G" in arg:
+                return "signature placeholders (%G...) run gpg and are not allowed"
+        elif arg.startswith("-"):
+            for refused in GIT_REFUSED_SHORT.get(sub, ()):
+                if arg.startswith(refused):
+                    return f"Git option {refused!r} is not allowed for {sub}"
+    return None
+
+
 def git(repo, args, *, executables, timeout, max_bytes, tmp_dir=None, index_copy=False) -> RunResult:
     """Run a read-only Git command. index_copy=True points Git at a private copy of the index,
     because porcelain `git diff` and `git status` rewrite .git/index even with optional locks
     off (script-board finding F4)."""
+    args = list(args)
+    problem = git_refusal(args)
+    if problem:
+        raise CommandNotAllowed(problem)
+    if args[0] in GIT_DIFF_SUBCOMMANDS:
+        args = [args[0], "--no-ext-diff", "--no-textconv", *args[1:]]
     argv = ["git", "-C", repo, *GIT_BASE, *args]
     if not index_copy:
         return run(argv, executables=executables, timeout=timeout, max_bytes=max_bytes)

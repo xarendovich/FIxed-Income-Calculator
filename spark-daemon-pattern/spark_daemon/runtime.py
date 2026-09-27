@@ -198,7 +198,7 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
     guard.install_audit_hook(policy, audit_mode)
     try:
         module = _load_module(m.code_path)
-    except Exception as e:  # noqa: BLE001
+    except BaseException as e:  # noqa: BLE001 - includes SystemExit raised by daemon code
         log(f"daemon code failed to import ({_exception_name(e)})")
         return EXIT_USAGE
 
@@ -262,7 +262,9 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
                 error = ("POLICY_VIOLATION", e)
             except (CanonicalError, ledger.RecordTooLarge, _EventError) as e:
                 error = ("SNAPSHOT_INVALID" if stage == "sense" else "EVENT_INVALID", e)
-            except Exception as e:  # noqa: BLE001 - daemon code may fail; the skeleton records it
+            except BaseException as e:  # noqa: BLE001 - daemon code may fail, even with SystemExit
+                # or KeyboardInterrupt raised by hand; the skeleton records it and carries on.
+                # A stop request arrives as a flag (see _Stop), never as an exception.
                 error = (f"{stage.upper()}_FAILED", e)
 
             if not error:
@@ -359,5 +361,6 @@ def _refresh_digest(module, m, out, writer, snapshot, recent):
                  "last_event_utc": recent[-1]["timestamp_utc"] if recent else None}
         data = render.render_digest(m.name, stamp, sections, m.digest.max_bytes)
         _atomic_write(out, DIGEST_NAME, data)
-    except Exception as e:  # noqa: BLE001 - includes PolicyViolation; the violation counter catches that
+    except BaseException as e:  # noqa: BLE001 - includes PolicyViolation and a hand-raised SystemExit;
+        # the violation counter catches the former
         log(f"digest not refreshed ({_exception_name(e)})")
