@@ -30,7 +30,7 @@ class UnitError(ValueError):
 
 
 def _unit_path(label, path) -> str:
-    if not _UNIT_SAFE_PATH.match(path):
+    if not _UNIT_SAFE_PATH.fullmatch(path):
         raise UnitError(f"{label} {path!r} contains characters that are unsafe in a systemd unit")
     return path
 

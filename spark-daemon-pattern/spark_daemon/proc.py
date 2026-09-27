@@ -134,6 +134,14 @@ def _kill_group(proc):
         pass
 
 
+def git_base(repo: str) -> tuple:
+    """GIT_BASE plus safe.directory for exactly this repository (r3, PD-25). A daemon runs as
+    its own system user (PD-09), so the repositories it observes belong to someone else, and
+    Git (2.35.2+) refuses them as "dubious ownership" - every ctx.git() call would fail with
+    exit 128. Only the declared, already-resolved path is trusted, never "*"."""
+    return (*GIT_BASE, "-c", f"safe.directory={repo}")
+
+
 def git_refusal(args):
     """Why ctx.git() refuses this argument list, or None if it is allowed.
 
@@ -178,12 +186,13 @@ def git(repo, args, *, executables, timeout, max_bytes, tmp_dir=None, index_copy
         raise CommandNotAllowed(problem)
     if args[0] in GIT_DIFF_SUBCOMMANDS:
         args = [args[0], "--no-ext-diff", "--no-textconv", *args[1:]]
-    argv = ["git", "-C", repo, *GIT_BASE, *args]
+    base = git_base(repo)
+    argv = ["git", "-C", repo, *base, *args]
     if not index_copy:
         return run(argv, executables=executables, timeout=timeout, max_bytes=max_bytes)
     if tmp_dir is None:
         raise ValueError("index_copy needs tmp_dir")
-    where = run(["git", "-C", repo, *GIT_BASE, "rev-parse", "--path-format=absolute", "--git-path", "index"],
+    where = run(["git", "-C", repo, *base, "rev-parse", "--path-format=absolute", "--git-path", "index"],
                 executables=executables, timeout=timeout, max_bytes=4096)
     index_path = where.stdout.strip()
     if where.returncode != 0 or not index_path:

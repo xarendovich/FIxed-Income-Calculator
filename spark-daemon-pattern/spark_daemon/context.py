@@ -23,14 +23,16 @@ class TooLarge(Exception):
 
 
 class NotAllowed(Exception):
-    """The request is outside the manifest (counted as a policy violation)."""
+    """The request is outside the manifest. Counted as a policy violation: the daemon stops
+    with exit 78 after the cycle even if its own code catches this."""
 
 
 @dataclass(frozen=True)
 class StatInfo:
     kind: str          # "file", "dir", "link" or "other"
     size: int
-    mtime_ns: int
+    mtime_us: int      # microseconds since the epoch. r2 returned mtime_ns (about 1.8e18), which is
+                       # outside the canonical integer range, so any snapshot holding it was refused.
 
 
 @dataclass(frozen=True)
@@ -69,11 +71,11 @@ class Context:
         self._timeout = step_timeout
         self._tmp = tmp_dir
 
-    def _resolve(self, path):
-        if not isinstance(path, str):
+    def _resolve(self, path, follow=True):
+        if not isinstance(path, str) or "\0" in path:
             raise NotAllowed("paths must be strings")
         try:
-            return self._policy.readable(path)
+            return self._policy.readable(path, follow=follow)
         except GuardError as e:
             raise NotAllowed(str(e)) from None
 
@@ -90,6 +92,7 @@ class Context:
         return data.decode("utf-8", "replace")
 
     def list_dir(self, path: str, max_entries: int = 1024) -> Listing:
+        """Sorted entry names of a directory; truncated=True past max_entries."""
         full = self._resolve(path)
         try:
             with os.scandir(full) as it:
@@ -103,7 +106,8 @@ class Context:
         return Listing(tuple(sorted(names)), False)
 
     def stat(self, path: str) -> StatInfo:
-        full = self._resolve(path)
+        """Kind ("file", "dir", "link" or "other"), size and mtime_us; symlinks are not followed."""
+        full = self._resolve(path, follow=False)
         try:
             st = os.lstat(full)
         except FileNotFoundError:
@@ -111,9 +115,10 @@ class Context:
         mode = st.st_mode
         kind = ("file" if stat_mod.S_ISREG(mode) else "dir" if stat_mod.S_ISDIR(mode)
                 else "link" if stat_mod.S_ISLNK(mode) else "other")
-        return StatInfo(kind, st.st_size, st.st_mtime_ns)
+        return StatInfo(kind, st.st_size, st.st_mtime_ns // 1000)
 
     def disk_usage(self, path: str) -> DiskUsage:
+        """Total, free and available bytes of the filesystem holding a declared path."""
         full = self._resolve(path)
         try:
             v = os.statvfs(full)

@@ -1,0 +1,4 @@
+{
+  "_comment": "Every published contract_version and its contract_sha256. A change to any enforced rule changes the sha; the self-tests fail until CONTRACT_VERSION is bumped (semver: MAJOR if an existing daemon could now fail) and a new line is added here. Never edit an existing line.",
+  "1.0.0": "ef03a744961cfad81abced56b0c12b18b222ce3219d779e5f6f79a64319fb585"
+}

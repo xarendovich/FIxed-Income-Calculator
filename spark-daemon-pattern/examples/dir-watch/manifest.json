@@ -1,0 +1,19 @@
+{
+  "manifest_schema": "spark-daemon-manifest/1",
+  "name": "dir-watch",
+  "version": "0.1.0",
+  "purpose": "Records files appearing, disappearing or changing in the Spark inbox folder (names, sizes, mtimes; never contents).",
+  "daemon_class": "observe",
+  "trigger": {"kind": "poll", "interval_seconds": 60},
+  "reads": ["~/spark-inbox"],
+  "commands": [],
+  "output_dir": "~/spark-daemons/dir-watch",
+  "deny": [],
+  "network": {"mode": "none"},
+  "run_as": {"unit": "system", "user": "spark-dirwatch"},
+  "resources": {"cpu_weight": 10, "cpu_budget_bp": 100, "memory_max_mb": 64, "tasks_max": 8, "io_class": "idle"},
+  "watchdog_seconds": 120,
+  "step_timeout_seconds": 10,
+  "ledger": {"record_max_bytes": 32768, "event_types": ["INBOX_BASELINE", "INBOX_ENTRIES_ADDED", "INBOX_ENTRIES_REMOVED", "INBOX_ENTRIES_CHANGED", "INBOX_AVAILABILITY_CHANGED"]},
+  "digest": {"enabled": true, "max_bytes": 16384}
+}

@@ -1,0 +1,439 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:spark:schema:spark-daemon-manifest:1",
+  "title": "Spark daemon manifest (spark-daemon-manifest/1)",
+  "description": "Closed schema: unknown keys are refused at every level, every value is bounded, floats are refused. Cross-field rules that JSON Schema cannot express are listed under x-spark-cross-field-rules.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "commands",
+    "daemon_class",
+    "deny",
+    "digest",
+    "ledger",
+    "manifest_schema",
+    "name",
+    "network",
+    "output_dir",
+    "purpose",
+    "reads",
+    "resources",
+    "run_as",
+    "step_timeout_seconds",
+    "trigger",
+    "version",
+    "watchdog_seconds"
+  ],
+  "properties": {
+    "manifest_schema": {
+      "const": "spark-daemon-manifest/1"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{2,39}(?![\\s\\S])",
+      "description": "Slug: 3-40 characters, lowercase letters, digits and '-'."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})(?![\\s\\S])",
+      "description": "x.y.z"
+    },
+    "purpose": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9 .,;:()/'+-]{10,200}(?![\\s\\S])",
+      "description": "One plain line; no '%' (a systemd specifier)."
+    },
+    "daemon_class": {
+      "enum": [
+        "observe"
+      ],
+      "description": "'act' is reserved: acting daemons need their own pattern and authority gate (PD-01)."
+    },
+    "trigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "interval_seconds"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "poll"
+          ],
+          "description": "'inotify-wakeup' is reserved (C2)."
+        },
+        "interval_seconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 86400,
+          "description": "Poll interval."
+        }
+      }
+    },
+    "reads": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/path"
+      },
+      "description": "What ctx may read; none inside a denied path."
+    },
+    "commands": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9._-]{0,31}(?![\\s\\S])",
+        "not": {
+          "anyOf": [
+            {
+              "enum": [
+                "ash",
+                "at",
+                "awk",
+                "bash",
+                "batch",
+                "bun",
+                "busctl",
+                "busybox",
+                "capsh",
+                "cc",
+                "chgrp",
+                "chmod",
+                "chown",
+                "chroot",
+                "clang",
+                "cp",
+                "crontab",
+                "csh",
+                "csplit",
+                "curl",
+                "dash",
+                "dbus-send",
+                "dd",
+                "deno",
+                "doas",
+                "docker",
+                "ed",
+                "emacs",
+                "env",
+                "ex",
+                "expect",
+                "find",
+                "fish",
+                "flock",
+                "ftp",
+                "gawk",
+                "gcc",
+                "gdb",
+                "gpg",
+                "gpg2",
+                "halt",
+                "install",
+                "ionice",
+                "ip",
+                "iptables",
+                "irb",
+                "java",
+                "kill",
+                "killall",
+                "ksh",
+                "ld",
+                "less",
+                "ln",
+                "loginctl",
+                "ltrace",
+                "make",
+                "man",
+                "mawk",
+                "mkdir",
+                "mkfifo",
+                "mknod",
+                "mksh",
+                "more",
+                "mount",
+                "mv",
+                "nano",
+                "nawk",
+                "nc",
+                "ncat",
+                "netcat",
+                "nft",
+                "nice",
+                "nmcli",
+                "nohup",
+                "npm",
+                "npx",
+                "nsenter",
+                "nvim",
+                "openssl",
+                "parallel",
+                "patch",
+                "pip",
+                "pip3",
+                "pkexec",
+                "pkill",
+                "podman",
+                "poweroff",
+                "pwsh",
+                "reboot",
+                "rm",
+                "rmdir",
+                "rsync",
+                "runuser",
+                "scp",
+                "script",
+                "sed",
+                "setpriv",
+                "setsid",
+                "sftp",
+                "sh",
+                "shred",
+                "shutdown",
+                "socat",
+                "split",
+                "sqlite3",
+                "ssh",
+                "stdbuf",
+                "strace",
+                "su",
+                "sudo",
+                "systemctl",
+                "systemd-run",
+                "tar",
+                "tclsh",
+                "tcsh",
+                "tee",
+                "telnet",
+                "timeout",
+                "touch",
+                "toybox",
+                "truncate",
+                "umount",
+                "unshare",
+                "unzip",
+                "vi",
+                "vim",
+                "watch",
+                "wget",
+                "wish",
+                "xargs",
+                "zip",
+                "zsh"
+              ]
+            },
+            {
+              "pattern": "^(python|pypy|perl|node|ruby|php|lua|tcl|java|busybox)"
+            }
+          ]
+        }
+      },
+      "description": "Bare command names ctx.run may execute ('git' only via ctx.git)."
+    },
+    "output_dir": {
+      "$ref": "#/$defs/path"
+    },
+    "deny": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/path"
+      },
+      "description": "Extra denied paths, added to the fixed base list."
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "none"
+          ],
+          "description": "'named' is reserved (relaxation R2)."
+        }
+      }
+    },
+    "run_as": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "unit",
+            "user"
+          ],
+          "properties": {
+            "unit": {
+              "const": "system"
+            },
+            "user": {
+              "type": "string",
+              "pattern": "^[a-z_][a-z0-9_-]{0,31}(?![\\s\\S])",
+              "not": {
+                "const": "root"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "unit"
+          ],
+          "properties": {
+            "unit": {
+              "const": "user"
+            }
+          }
+        }
+      ]
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpu_weight",
+        "cpu_budget_bp",
+        "memory_max_mb",
+        "tasks_max",
+        "io_class"
+      ],
+      "properties": {
+        "cpu_weight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "systemd CPUWeight="
+        },
+        "cpu_budget_bp": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "description": "CPU budget in basis points (100 = 1%), checked by DB-14 including child processes."
+        },
+        "memory_max_mb": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 2048,
+          "description": "systemd MemoryMax=; floor 64 (PD-20)."
+        },
+        "tasks_max": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 64,
+          "description": "systemd TasksMax="
+        },
+        "io_class": {
+          "enum": [
+            "idle",
+            "best-effort"
+          ]
+        }
+      }
+    },
+    "watchdog_seconds": {
+      "type": "integer",
+      "minimum": 10,
+      "maximum": 3600,
+      "description": "systemd WatchdogSec="
+    },
+    "step_timeout_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 600,
+      "description": "Timeout for each ctx.run/ctx.git; at most half of watchdog_seconds."
+    },
+    "ledger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_max_bytes",
+        "event_types"
+      ],
+      "properties": {
+        "record_max_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 1048576,
+          "description": "Largest canonical record, bytes."
+        },
+        "event_types": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{2,47}(?![\\s\\S])",
+            "not": {
+              "enum": [
+                "DAEMON_START",
+                "DAEMON_STOP",
+                "DAEMON_ERROR",
+                "DAEMON_ERROR_CLEARED",
+                "LEDGER_TAIL_QUARANTINED"
+              ]
+            }
+          },
+          "description": "The only event types decide() may return."
+        }
+      }
+    },
+    "digest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "max_bytes"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 262144,
+          "description": "Digest size bound, bytes."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "path": {
+      "type": "string",
+      "pattern": "^(~|~/[A-Za-z0-9._/-]*|/[A-Za-z0-9._/-]*)(?![\\s\\S])",
+      "not": {
+        "anyOf": [
+          {
+            "pattern": "//"
+          },
+          {
+            "pattern": ".+/$"
+          },
+          {
+            "pattern": "(^|/)\\.\\.?(/|$)"
+          }
+        ]
+      },
+      "description": "Absolute or ~/ path of letters, digits and ._/- ; no '.' or '..' segments, no '//', no trailing '/'."
+    }
+  },
+  "x-spark-cross-field-rules": [
+    "step_timeout_seconds must be at most half of watchdog_seconds",
+    "run_as.user is required for unit 'system', must not be 'root', and is refused for unit 'user'",
+    "paths are compared after expanding '~' (SPARK_DAEMON_HOME, else HOME) and resolving symlinks",
+    "every read path must lie outside every denied path (base deny plus the manifest's deny)",
+    "output_dir must not lie inside, or contain, ~/spark-core, ~/spark-governance, a base-deny path or a path in the manifest's deny",
+    "output_dir must not overlap any read path (a daemon never observes its own output)"
+  ]
+}

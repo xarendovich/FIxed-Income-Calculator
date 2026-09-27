@@ -192,7 +192,7 @@ class _Checker:
         return value
 
     def text(self, where, value, pattern, hint):
-        if not isinstance(value, str) or not pattern.match(value):
+        if not isinstance(value, str) or not pattern.fullmatch(value):
             self.fail(where, hint)
             return None
         return value

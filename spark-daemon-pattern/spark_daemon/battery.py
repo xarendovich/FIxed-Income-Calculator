@@ -218,11 +218,11 @@ def db02(ws, c):
     c.evidence = "; ".join(problems[:5]) if problems else "no findings"
 
 
-def db03(ws, c):
+def db03(ws, c, cycles=5):
     ws.reset_output()
     exclude = [ws.output]
     before = _snapshot(ws.home, exclude) | {f"daemon/{k}": v for k, v in _snapshot(ws.daemon_dir, []).items()}
-    p = run_proc(ws.run_cmd(cycles=5), ws.env(SPARK_DAEMON_AUDIT="record"))
+    p = run_proc(ws.run_cmd(cycles=cycles), ws.env(SPARK_DAEMON_AUDIT="record"))
     after = _snapshot(ws.home, exclude) | {f"daemon/{k}": v for k, v in _snapshot(ws.daemon_dir, []).items()}
     audits = [line for line in p.stderr.splitlines() if "spark_daemon_audit" in line]
     changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
@@ -234,7 +234,7 @@ def db03(ws, c):
     if changed:
         problems.append(f"changed outside output dir: {', '.join(changed[:5])}")
     c.state = "FAIL" if problems else "PASS"
-    c.evidence = "; ".join(problems) or "5 cycles; 0 audit events; no file outside the output directory changed"
+    c.evidence = "; ".join(problems) or f"{cycles} cycles; 0 audit events; no file outside the output directory changed"
 
 
 def db04(ws, c):
@@ -254,6 +254,12 @@ def db04(ws, c):
     undeclared = sorted({r["event_type"] for r in recs} - declared)
     if undeclared:
         problems.append(f"undeclared event types {undeclared}")
+    # r3: a daemon whose every cycle fails still exits 0 and writes a valid chain; r2 passed
+    # it. A clean run in the battery's own workspace must not record a single error.
+    errors = [r["payload"] for r in recs if r["event_type"] == "DAEMON_ERROR"]
+    if errors:
+        problems.append(f"{len(errors)} DAEMON_ERROR record(s) in a clean run, first: "
+                        f"{json.dumps(errors[0], sort_keys=True)[:120]}")
     start = recs[0]["payload"] if recs else {}
     if start.get("manifest_sha256") != ws.m.sha256:
         problems.append("DAEMON_START manifest_sha256 does not match")
@@ -655,7 +661,8 @@ def db18(ws, c):
         f"matches this host's ABI and the manifest's own gaps")
 
 
-def main(manifest_path: str, *, seed: int, quick: bool, workdir: str | None, threshold: int) -> int:
+def main(manifest_path: str, *, seed: int, quick: bool, workdir: str | None, threshold: int,
+         envelope: str | None = None) -> int:
     if not os.path.exists(manifest_path):
         print(f"no manifest at {manifest_path}")
         return EXIT_USAGE
@@ -715,8 +722,19 @@ def main(manifest_path: str, *, seed: int, quick: bool, workdir: str | None, thr
 
     states = [c.state for c in checks]
     result = "FAIL" if "FAIL" in states else "INCOMPLETE" if "UNKNOWN" in states else "PASS"
+    from . import contract, handoff
+    candidate = None
+    if envelope:
+        # The battery judges the files it ran. The envelope is quoted so the report can be
+        # tied to a candidate; an envelope that does not match those files means the report
+        # is about different bytes than the candidate claims, so the verdict cannot be PASS.
+        summary, diags = handoff.check_envelope(envelope, os.path.dirname(os.path.abspath(manifest_path)))
+        candidate = {"summary": summary, "diagnostics": diags}
+        if any(d["severity"] == "error" for d in diags) and result == "PASS":
+            result = "INCOMPLETE"
     report = {
-        "schema": BATTERY_SCHEMA, "skeleton_version": VERSION, "result": result, "seed": seed,
+        "schema": BATTERY_SCHEMA, "skeleton_version": VERSION, **contract.contract_identity(),
+        "candidate": candidate, "result": result, "seed": seed,
         "quick": quick, "daemon": m.name if m else None, "manifest_sha256": m.sha256 if m else None,
         "workspace": ws.root, "rewrites": ws.rewrites,
         "environment": {"python": sys.version.split()[0], "kernel": os.uname().release,
@@ -733,6 +751,9 @@ def main(manifest_path: str, *, seed: int, quick: bool, workdir: str | None, thr
         print(f"{c.id}  {c.state:<10} {c.title:<{width}}  {c.evidence}")
     for note in ws.rewrites:
         print(f"note: battery rewrote {note}")
+    if candidate:
+        for d in candidate["diagnostics"]:
+            print(f"candidate: {d['where']}: {d['message']}")
     print(f"report: {report_path}")
     print(f"RESULT: {result}")
     return {"PASS": EXIT_OK, "INCOMPLETE": EXIT_FLAGGED}.get(result, EXIT_FAILED)

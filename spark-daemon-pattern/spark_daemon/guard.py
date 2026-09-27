@@ -88,9 +88,16 @@ class Policy:
     def denied(self, full: str) -> bool:
         return any(within(full, d) for d in self.deny)
 
-    def readable(self, path: str) -> str:
-        """Resolve a path the daemon asked to read, or raise GuardError."""
-        full = expand(path)
+    def readable(self, path: str, follow: bool = True) -> str:
+        """Resolve a path the daemon asked to read, or raise GuardError. follow=False resolves
+        only the parent directory and keeps the last component as named, for lstat()-style
+        calls: a symlink inside a declared read is then judged by where it is, not by where
+        it points, so a link planted in a watched folder cannot trip fail-closed (78)."""
+        name = os.path.basename(path)
+        if not follow and name not in ("", ".", "..", "~"):
+            full = os.path.join(expand(os.path.dirname(path) or "."), name)
+        else:
+            full = expand(path)
         if self.denied(full):
             _count("read-denied-path")
             raise GuardError("path is denied")

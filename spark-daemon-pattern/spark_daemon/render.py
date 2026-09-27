@@ -82,7 +82,7 @@ def normalize_sections(sections) -> list:
         if not isinstance(section, (list, tuple)) or len(section) != 2:
             raise RenderError("each section must be (title, rows)")
         title, rows = section
-        if not isinstance(title, str) or not LABEL_RE.match(title):
+        if not isinstance(title, str) or not LABEL_RE.fullmatch(title):
             raise RenderError("section titles must match LABEL_RE")
         if not isinstance(rows, (list, tuple)):
             raise RenderError("rows must be a list")
@@ -91,7 +91,7 @@ def normalize_sections(sections) -> list:
             if not isinstance(row, (list, tuple)) or len(row) != 2:
                 raise RenderError("each row must be (label, value)")
             label, value = row
-            if not isinstance(label, str) or not LABEL_RE.match(label):
+            if not isinstance(label, str) or not LABEL_RE.fullmatch(label):
                 raise RenderError("row labels must match LABEL_RE")
             if value is not None and not isinstance(value, (str, int, bool)):
                 raise RenderError("row values must be str, int, bool or None")

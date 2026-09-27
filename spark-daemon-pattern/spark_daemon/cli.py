@@ -1,5 +1,9 @@
-"""Command line: validate | unit | run | verify | battery | probe-policy | probe-landlock |
-probe-digest."""
+"""Command line.
+
+Authoring and handoff: describe | schema | scaffold | envelope | validate | precheck
+Evidence and operation: battery | unit | run | verify
+Internal (the battery's child processes): probe-policy | probe-landlock | probe-digest
+"""
 
 import argparse
 import json
@@ -13,8 +17,32 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="spark-daemon", description=f"Spark daemon pattern {VERSION} (draft)")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("validate", help="validate a manifest and the purity of its daemon.py")
+    p = sub.add_parser("describe", help="print the daemon contract (spark-daemon-contract/1) as JSON")
+    p.add_argument("--identity", action="store_true", help="print only contract_version and contract_sha256")
+
+    sub.add_parser("schema", help="print the manifest JSON Schema (draft 2020-12)")
+
+    p = sub.add_parser("scaffold", help="write a starting manifest.json, daemon.py and candidate.json")
+    p.add_argument("--name", required=True)
+    p.add_argument("--dir", required=True)
+    p.add_argument("--purpose", default=None)
+    p.add_argument("--unit", choices=("system", "user"), default="system")
+
+    p = sub.add_parser("envelope", help="write candidate.json for the manifest.json and daemon.py in a folder")
+    p.add_argument("--dir", required=True)
+    p.add_argument("--producer-kind", required=True, choices=("human", "script", "model"))
+    p.add_argument("--producer-id", required=True)
+    p.add_argument("--intent", required=True)
+
+    p = sub.add_parser("validate", help="validate a manifest, the purity of its daemon.py and a candidate envelope")
     p.add_argument("--manifest", required=True)
+    p.add_argument("--envelope", default=None, help="candidate.json to check against the files and the contract")
+    p.add_argument("--json", action="store_true", help="print a spark-daemon-validate/1 report")
+
+    p = sub.add_parser("precheck", help="fast pre-battery lane: validate plus a short confined run (JSON report)")
+    p.add_argument("--manifest", required=True)
+    p.add_argument("--envelope", default=None)
+    p.add_argument("--workdir", default=None)
 
     p = sub.add_parser("unit", help="print the generated systemd unit and install plan (never installs)")
     p.add_argument("--manifest", required=True)
@@ -34,6 +62,7 @@ def main(argv=None) -> int:
     p.add_argument("--quick", action="store_true")
     p.add_argument("--workdir", default=None)
     p.add_argument("--threshold", type=int, default=20, help="systemd-analyze exposure threshold in tenths (20 = 2.0)")
+    p.add_argument("--envelope", default=None, help="candidate.json to quote in the report")
 
     p = sub.add_parser("probe-policy", help=argparse.SUPPRESS)
     p.add_argument("--manifest", required=True)
@@ -49,21 +78,70 @@ def main(argv=None) -> int:
 
     args = parser.parse_args(argv)
 
-    if args.command == "validate":
-        from . import manifest, purity
+    if args.command == "describe":
+        from . import contract
+        doc = contract.contract_identity() if args.identity else contract.describe()
+        print(json.dumps(doc, indent=2, ensure_ascii=False))
+        return EXIT_OK
+
+    if args.command == "schema":
+        from . import contract
+        print(json.dumps(contract.manifest_json_schema(), indent=2, ensure_ascii=False))
+        return EXIT_OK
+
+    if args.command == "scaffold":
+        from . import scaffold
         try:
-            m = manifest.load(args.manifest)
-        except manifest.ManifestError as e:
-            for problem in e.problems:
-                print(f"manifest: {problem}")
-            print("RESULT: FAIL")
-            return EXIT_FAILED
-        problems = purity.check_file(m.code_path)
-        for problem in problems:
-            print(f"purity: {problem}")
-        print(f"manifest sha256 {m.sha256}")
-        print("RESULT: FAIL" if problems else "RESULT: PASS")
-        return EXIT_FAILED if problems else EXIT_OK
+            written = scaffold.scaffold(args.dir, name=args.name, purpose=args.purpose, unit=args.unit)
+        except (ValueError, FileExistsError) as e:
+            print(f"scaffold: {e}", file=sys.stderr)
+            return EXIT_USAGE
+        for path in written:
+            print(path)
+        return EXIT_OK
+
+    if args.command == "envelope":
+        from . import handoff
+        try:
+            env = handoff.make_envelope(args.dir, producer_kind=args.producer_kind,
+                                        producer_id=args.producer_id, intent=args.intent)
+        except (ValueError, OSError) as e:
+            print(f"envelope: {e}", file=sys.stderr)
+            return EXIT_USAGE
+        path = os.path.join(args.dir, handoff.ENVELOPE_NAME)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(env, fh, indent=2)
+            fh.write("\n")
+        print(path)
+        print(f"envelope sha256 {handoff.envelope_sha256(env)}")
+        return EXIT_OK
+
+    if args.command == "validate":
+        from . import handoff
+        report, _ = handoff.validate_report(args.manifest, args.envelope)
+        if args.json:
+            print(json.dumps(report, indent=2, ensure_ascii=False))
+        else:
+            for d in report["diagnostics"]:
+                where = d["where"] + (f":{d['line']}" if d["line"] else "")
+                prefix = "" if d["severity"] == "error" else "warning: "
+                print(f"{d['layer']}: {prefix}{where}: {d['message']}" if where else f"{d['layer']}: {d['message']}")
+            if report["manifest_sha256"]:
+                print(f"manifest sha256 {report['manifest_sha256']}")
+            if report["candidate"]:
+                print(f"candidate envelope sha256 {report['candidate']['envelope_sha256']} "
+                      f"(contract {report['candidate']['contract_match']})")
+            print(f"RESULT: {report['result']}")
+        return EXIT_OK if report["valid"] else EXIT_FAILED
+
+    if args.command == "precheck":
+        from . import handoff
+        if not os.path.exists(args.manifest):
+            print(f"no manifest at {args.manifest}", file=sys.stderr)
+            return EXIT_USAGE
+        report = handoff.precheck_report(args.manifest, args.envelope, args.workdir)
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return EXIT_OK if report["result"] == "OK" else EXIT_FAILED
 
     if args.command == "unit":
         from . import manifest, unitgen
@@ -117,7 +195,7 @@ def main(argv=None) -> int:
     if args.command == "battery":
         from . import battery
         return battery.main(args.manifest, seed=args.seed, quick=args.quick, workdir=args.workdir,
-                            threshold=args.threshold)
+                            threshold=args.threshold, envelope=args.envelope)
 
     if args.command == "probe-policy":
         from . import probes

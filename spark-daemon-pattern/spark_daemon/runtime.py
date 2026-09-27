@@ -323,8 +323,13 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
 
 
 def _cpu_us() -> int:
-    usage = resource.getrusage(resource.RUSAGE_SELF)
-    return int((usage.ru_utime + usage.ru_stime) * 1_000_000)
+    """CPU of this process plus every command it ran (ctx.run, ctx.git). r2 counted only
+    RUSAGE_SELF, so a daemon that did its work in child processes looked free to DB-14."""
+    total = 0.0
+    for who in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN):
+        usage = resource.getrusage(who)
+        total += usage.ru_utime + usage.ru_stime
+    return int(total * 1_000_000)
 
 
 class _EventError(ValueError):

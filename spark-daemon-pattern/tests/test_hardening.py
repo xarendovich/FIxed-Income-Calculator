@@ -75,6 +75,14 @@ class ManifestHardeningTests(unittest.TestCase):
         problems = self.problems(output_dir="~/out/counter", deny=["~/out"])
         self.assertTrue(any("must not be inside ~/out" in p for p in problems), problems)
 
+    def test_trailing_newlines_are_refused(self):
+        # r2 used re.match with "$", which also matches before a final newline: a name of
+        # "x\n" split the generated unit's Description= line in two.
+        self.assertTrue(self.problems(name="fixture-counter\n"))
+        self.assertTrue(self.problems(purpose="Test fixture daemon for the skeleton self-tests.\n"))
+        self.assertTrue(self.problems(reads=["~/data\n"]))
+        self.assertTrue(self.problems(run_as={"unit": "system", "user": "spark\n"}))
+
     def test_to_dict_is_bounded_and_strict(self):
         tmp = tempfile.mkdtemp()
         try:
@@ -131,6 +139,9 @@ class GitHardeningTests(unittest.TestCase):
         argv = seen["argv"]
         i = argv.index("log")
         self.assertEqual(argv[i:i + 4], ["log", "--no-ext-diff", "--no-textconv", "-p"])
+        # Only the declared repository is trusted for Git's ownership check (PD-25).
+        self.assertIn("safe.directory=/repo", argv)
+        self.assertNotIn("safe.directory=*", argv)
 
 
 @unittest.skipUnless(shutil.which("git", path="/usr/bin:/bin"), "git not installed")
@@ -306,6 +317,15 @@ class RuntimeHardeningTests(unittest.TestCase):
             sb.cleanup()
 
 
+class CpuAccountingTests(unittest.TestCase):
+    def test_cpu_includes_commands_the_daemon_ran(self):
+        from spark_daemon import runtime
+        before = runtime._cpu_us()
+        subprocess.run([sys.executable, "-c", "import time\nt=time.process_time()\n"
+                        "while time.process_time()-t<0.3: pass"], check=True)
+        self.assertGreater(runtime._cpu_us() - before, 200_000)
+
+
 class UnitHardeningTests(unittest.TestCase):
     def test_unit_allows_the_landlock_syscalls(self):
         m = manifest.load(os.path.join(EXAMPLE, "manifest.json"))
@@ -330,6 +350,14 @@ class UnitHardeningTests(unittest.TestCase):
             unitgen.generate(m, root="/opt/spark tools")
         with self.assertRaises(unitgen.UnitError):
             unitgen.generate(m, root=ROOT, python="/usr/bin/python3 -c evil")
+
+
+class RenderLabelTests(unittest.TestCase):
+    def test_label_with_trailing_newline_is_refused(self):
+        with self.assertRaises(render.RenderError):
+            render.normalize_sections([("Title\n", [])])
+        with self.assertRaises(render.RenderError):
+            render.normalize_sections([("Title", [("Label\n", 1)])])
 
 
 class RenderEfficiencyTests(unittest.TestCase):

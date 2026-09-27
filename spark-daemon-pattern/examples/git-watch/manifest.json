@@ -1,0 +1,19 @@
+{
+  "manifest_schema": "spark-daemon-manifest/1",
+  "name": "git-watch",
+  "version": "0.1.0",
+  "purpose": "Records branch and tag movements, HEAD switches and worktree cleanliness of one local Git repository.",
+  "daemon_class": "observe",
+  "trigger": {"kind": "poll", "interval_seconds": 60},
+  "reads": ["~/repos/watched"],
+  "commands": ["git"],
+  "output_dir": "~/spark-daemons/git-watch",
+  "deny": [],
+  "network": {"mode": "none"},
+  "run_as": {"unit": "system", "user": "spark-gitwatch"},
+  "resources": {"cpu_weight": 10, "cpu_budget_bp": 100, "memory_max_mb": 64, "tasks_max": 8, "io_class": "idle"},
+  "watchdog_seconds": 120,
+  "step_timeout_seconds": 20,
+  "ledger": {"record_max_bytes": 32768, "event_types": ["REPO_BASELINE", "REFS_CHANGED", "HEAD_SWITCHED", "WORKTREE_STATE_CHANGED", "REPO_AVAILABILITY_CHANGED"]},
+  "digest": {"enabled": true, "max_bytes": 16384}
+}
