@@ -2,7 +2,7 @@
   "schema": "spark-daemon-contract/1",
   "contract_version": "1.0.0",
   "contract_sha256": "ef03a744961cfad81abced56b0c12b18b222ce3219d779e5f6f79a64319fb585",
-  "skeleton_version": "0.1.0",
+  "skeleton_version": "0.3.0",
   "contract": {
     "manifest": {
       "schema_id": "urn:spark:schema:spark-daemon-manifest:1",

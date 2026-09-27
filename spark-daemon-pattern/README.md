@@ -1,19 +1,30 @@
-# Spark daemon pattern — v0.1 draft for review
+# Spark daemon pattern — v0.3 (r3) draft for review
 
-- **Status:** DRAFT FOR ADJUDICATION. Nothing here is approved, installed or running anywhere. The r2 changes below are implemented and self-tested (105 of 105 tests; 18 of 18 battery checks pass on this workspace's kernel, Landlock ABI 7) — that is evidence for the human's Class C ruling, not the ruling itself. Every PD below is still PENDING until recorded in the decision log.
-- **Revision:** r2, 2026-09-27, drafted by Claude from Observer v0.3, the WBS 3.0 spec (r2), the Observer Improvement Proposal and the Spark Script Repository board. r2 adjudicates four external proposals (`ADJUDICATION-AP.md`, PD-15 to PD-20) plus two further ones submitted the same day (polling jitter and per-cycle GC forcing, PD-21 to PD-22), and implements the parts with a clear draft verdict: Landlock (AP-01), JCS key ordering (AP-03/J1), the 64 MB memory floor (IF-01/PD-20), polling jitter and GC forcing. The out-of-process supervisor/worker split (AP-04, S1-S7) stays a design only in `ADJUDICATION-AP.md` — none of it is built yet.
+- **Status:** DRAFT FOR ADJUDICATION. Nothing here is approved, installed or running anywhere. r3 is implemented and self-tested: 170 of 170 tests pass on Python 3.10, 3.11, 3.12 and 3.13, and all four reference daemons pass 18 of 18 battery checks on this workspace's kernel (Landlock ABI 7). That is evidence for the human's Class C ruling, not the ruling itself. Every PD (PD-01 to PD-31) is still PENDING until recorded in the decision log.
+- **r3 in one line:** a review that reproduced and fixed 22 defects, including two confinement escapes (`HARDENING.md`), plus a published, versioned daemon contract and a candidate handoff that carries no authority (`DAEMON-CONTRACT.md`).
+- **Revision:** r3, 2026-09-27 (see the revision history; r2 below for context). r2, 2026-09-27, drafted by Claude from Observer v0.3, the WBS 3.0 spec (r2), the Observer Improvement Proposal and the Spark Script Repository board. r2 adjudicates four external proposals (`ADJUDICATION-AP.md`, PD-15 to PD-20) plus two further ones submitted the same day (polling jitter and per-cycle GC forcing, PD-21 to PD-22), and implements the parts with a clear draft verdict: Landlock (AP-01), JCS key ordering (AP-03/J1), the 64 MB memory floor (IF-01/PD-20), polling jitter and GC forcing. The out-of-process supervisor/worker split (AP-04, S1-S7) stays a design only in `ADJUDICATION-AP.md` — none of it is built yet.
 - **Adjudicated by:**
 - **Adjudicated on:**
 
 A daemon built from this pattern has three parts. A **manifest** declares everything about its safety in a closed schema. A fixed **skeleton** supplies every safety mechanism, so the daemon's author writes only what to observe. A **conformance battery** runs the real daemon through eighteen checks before anyone may activate it. v1 admits only daemons that observe and record; nothing in this package installs, enables or starts a service, and `spark-new daemon` is deliberately not built yet.
+
+Whoever writes a daemon, whether a person, a script or a model, builds against one published **contract** (`spark-daemon describe`, `contract/`) and hands back a **candidate** (`manifest.json`, `daemon.py`, `candidate.json`). A candidate carries no authority: validate and precheck are fast feedback, the battery's PASS is the only admissible evidence, and activation stays a human Class C decision (section 4, `DAEMON-CONTRACT.md`).
 
 ## What is in the folder
 
 ```text
 spark-daemon-pattern/
   ADJUDICATION-AP.md        draft adjudication of external proposals AP-01..AP-04 (r2)
+  HARDENING.md              r3 review: 22 reproduced defects, fixes, tests, residual risks
+  DAEMON-CONTRACT.md        r3 handoff design: contract, candidate envelope, evidence lanes, PD-23..PD-31
+  Makefile                  test | contract | check-contract | validate/precheck/battery-examples | evidence
   bin/spark-daemon          entry point; works under python3 -I -B (isolated, no bytecode)
+  contract/                 generated, never hand-edited: daemon-contract.json, manifest.schema.json,
+                            versions.json (append-only contract_version -> contract_sha256)
   spark_daemon/
+    contract.py             the daemon contract and the manifest JSON Schema, from the enforced rules (r3)
+    handoff.py              candidate envelopes, validate --json, precheck (r3)
+    scaffold.py             a blank page that passes the battery (r3)
     manifest.py             the closed-schema manifest and its validator
     runtime.py              the skeleton: start-up order, cycle loop, lifecycle events
     ledger.py               append-only hash-chained ledger, recovery, torn-tail quarantine
@@ -27,14 +38,19 @@ spark-daemon-pattern/
     purity.py               static check of the daemon's code before import
     unitgen.py              sandboxed systemd unit and human install plan (text only)
     battery.py, probes.py   the conformance battery and its child-process probes
-    cli.py                  validate | unit | run | verify | battery | probe-landlock
-  examples/meminfo-watch/   the reference daemon (GB10 unified-memory bands)
-  tests/                    105 skeleton self-tests and 7 fixture daemons, some deliberately bad
-  evidence/                 battery report and self-test output; evidence/ap/ holds the
-                            Landlock and JCS probes behind ADJUDICATION-AP.md
+    cli.py                  describe | schema | scaffold | envelope | validate | precheck |
+                            battery | unit | run | verify (+ internal probes)
+  examples/                 four reference daemons, one idiom each (DAEMON-CONTRACT.md section 7):
+    meminfo-watch/          GB10 unified-memory bands from /proc
+    disk-watch/             free-space bands on the model-weights filesystem
+    dir-watch/              inventory diff of a drop folder (names, sizes, mtimes)
+    git-watch/              refs, HEAD and worktree state via read-only ctx.git (bare-repo fixture)
+  tests/                    170 self-tests and 7 fixture daemons, some deliberately bad
+  evidence/                 r2 battery report and self-test output; evidence/r3/ holds the r3 runs.
+                            (r2 also listed evidence/ap/, which was not in the uploaded zip: HF-23)
 ```
 
-Requirements: Linux, Python 3.10 or later (tested on 3.10, 3.11 and 3.12.3, the DGX venv version), Git 2.31 or later. Optional: `strace` for the two fault-injection checks, `systemd-analyze` for the unit score; without them those checks report UNKNOWN, never PASS.
+Requirements: Linux, Python 3.10 or later (tested on 3.10, 3.11, 3.12.3, the DGX venv version, and 3.13), Git 2.31 or later. Standard library only; `jsonschema` is an optional test dependency for the schema-agreement tests. Optional: `strace` for the two fault-injection checks, `systemd-analyze` for the unit score; without them those checks report UNKNOWN, never PASS.
 
 ## Try it
 
@@ -44,7 +60,13 @@ python3 -I -B bin/spark-daemon validate --manifest examples/meminfo-watch/manife
 python3 -I -B bin/spark-daemon unit --manifest examples/meminfo-watch/manifest.json          # prints the unit
 python3 -I -B bin/spark-daemon unit --plan --manifest examples/meminfo-watch/manifest.json   # prints the install plan
 python3 -I -B bin/spark-daemon battery --manifest examples/meminfo-watch/manifest.json       # ~15 s, disposable workspace
-python3 -B -m unittest discover -s tests -t tests                                             # ~30 s
+python3 -B -m unittest discover -s tests -t tests                                             # ~65 s (or: make test)
+
+# Authoring and handoff (r3)
+python3 -I -B bin/spark-daemon describe --identity                                            # contract_version, contract_sha256
+python3 -I -B bin/spark-daemon scaffold --name my-watch --dir /tmp/my-watch                   # blank page; passes the battery
+python3 -I -B bin/spark-daemon validate --json --manifest /tmp/my-watch/manifest.json --envelope /tmp/my-watch/candidate.json
+python3 -I -B bin/spark-daemon precheck --manifest /tmp/my-watch/manifest.json                # ~1 s fast lane, answers OK/FAIL
 ```
 
 The battery works in a temporary folder with its own HOME, so it never touches your real output directory, `~/spark-core` or `~/spark-governance`.
@@ -59,9 +81,9 @@ The battery works in a temporary folder with its own HOME, so it never touches y
 | `name`, `version`, `purpose` | slug; `x.y.z`; one plain line, no `%` | `%` is a systemd specifier |
 | `daemon_class` | `observe` only; `act` is reserved and refused | Acting daemons need their own pattern and authority gate |
 | `trigger` | `{"kind": "poll", "interval_seconds": 5..86400}`; `inotify-wakeup` reserved | Observer proposal C2 is deferred |
-| `reads` | 1–32 absolute or `~/` paths; none inside a denied path | What `ctx` may read |
-| `commands` | up to 8 bare names; shells, interpreters, network, privilege and file-mutation tools always refused | What `ctx.run` may execute |
-| `output_dir` | the only writable place; never inside `~/spark-core`, `~/spark-governance` or a denied path; never overlapping `reads` | A daemon never observes its own output (v0.3 §6.7) |
+| `reads` | 1–32 absolute or `~/` paths; none inside a denied path; no `.`/`..` segments, `//` or trailing `/` | What `ctx` may read |
+| `commands` | up to 8 bare names; shells, command runners (`env`, `timeout`, `tar`, `less`, ...), interpreters including versioned names (`python3.12`), network, privilege and file-mutation tools always refused | What `ctx.run` may execute; `git` only through `ctx.git` |
+| `output_dir` | the only writable place; never inside, and never containing, `~/spark-core`, `~/spark-governance` or a denied path (the manifest's own `deny` included); never overlapping `reads` | A daemon never observes its own output (v0.3 §6.7) |
 | `deny` | extra denied paths, added to a fixed base list that no manifest can shrink | Base: `~/spark-core/data`, `~/spark-governance/history`, `~/.ssh`, `~/.gnupg`, `~/.claude`, `~/.codex` |
 | `network` | `{"mode": "none"}`; `named` reserved | Outbound access needs relaxation R2 and a named destination |
 | `run_as` | `{"unit": "system", "user": ...}` (not root) or `{"unit": "user"}` | v0.3 §4 prefers a system unit with a dedicated user on Ubuntu 24.04 |
@@ -70,7 +92,7 @@ The battery works in a temporary folder with its own HOME, so it never touches y
 | `ledger` | `record_max_bytes`; 1–32 declared `event_types`, none of them reserved | Only declared events can be written |
 | `digest` | `enabled`, `max_bytes` | Size-bounded, with an explicit truncation marker |
 
-The manifest's canonical SHA-256 is recorded in every `DAEMON_START`, so each run names the exact configuration it ran under.
+The manifest's canonical SHA-256 is recorded in every `DAEMON_START`, so each run names the exact configuration it ran under. The same schema is published as JSON Schema 2020-12 in `contract/manifest.schema.json` (`spark-daemon schema`); the cross-field rules JSON Schema cannot express are listed in it under `x-spark-cross-field-rules`.
 
 ## 2. The skeleton
 
@@ -82,9 +104,11 @@ The manifest's canonical SHA-256 is recorded in every `DAEMON_START`, so each ru
 - `decide(prev, snapshot)`: pure. Returns a list of `(event_type, payload)`.
 - `digest(snapshot, recent)` (optional): pure. Returns `[(title, [(label, value), ...]), ...]`; the skeleton renders and contains it.
 
-`ctx` offers `read_text`, `list_dir`, `stat`, `disk_usage`, `run` (manifest commands only), `git` (hardened, optional private index copy) and `now_utc`. It has no method that writes, deletes, sends or executes anything else, so "observation never authorizes action" (v0.3 §6.2) holds by construction.
+`ctx` offers `read_text`, `list_dir`, `stat` (does not follow symlinks; returns `mtime_us`), `disk_usage`, `run` (manifest commands only, never `git`), `git` (read-only subcommands only; see below) and `now_utc`. It has no method that writes, deletes, sends or executes anything else, so "observation never authorizes action" (v0.3 §6.2) holds by construction. `spark-daemon describe` lists the exact signatures and result types.
 
-The code may import only `bisect collections dataclasses enum functools hashlib heapq itertools json math operator re statistics string textwrap typing`, must not call `open`, `exec`, `eval`, `getattr` and similar, must not touch dunder names, must not use `global`, and must have no import-time side effects. `purity.py` checks this before import.
+`ctx.git(repo, args)` takes a read-only subcommand first (`log`, `show`, `diff`, `status`, `rev-parse`, `for-each-ref`, ...), so the daemon's arguments can never be Git global options. File-writing, file-reading and program-running options are refused, including Git's abbreviations. Arguments may not name paths outside the repository. `--no-ext-diff --no-textconv` are forced on diff-producing subcommands, and `safe.directory` is set to exactly the declared repository (PD-25).
+
+The code may import only `bisect collections dataclasses enum functools hashlib heapq itertools json math operator re statistics string textwrap typing`. It must not name `open`, `exec`, `eval`, `getattr` and similar, not even to alias them. It must not touch dunder names, private attributes (`ctx._policy`) or introspection attributes (`gi_frame`, `f_builtins`, ...), nor use dynamic-access helpers (`attrgetter`, `string.Formatter`, `typing.get_type_hints`). It must not use `global`, and it may make no calls at import time beyond simple constructors such as `re.compile`. `purity.py` checks all of this before import; the full list is in the contract (`contract.code`).
 
 ### What the skeleton guarantees, and where each rule comes from
 
@@ -100,11 +124,13 @@ The code may import only `bisect collections dataclasses enum functools hashlib 
 | Single instance by `flock`; SIGTERM ends with `DAEMON_STOP` | runtime | Observer WBS 3.1 |
 | Restart after an unclean stop is visible: `previous_run_ended_cleanly: false` | runtime | Observer WBS 3.2 (gap visibility) |
 | Tool versions, manifest hash and code hash in every `DAEMON_START` | runtime | Proposal B2; script contract SC9 |
+| Daemon code that raises `SystemExit` is recorded as a failure, never a silent exit 0 (r3, HF-09) | runtime | Observer WBS 3.2 (gap visibility) |
+| CPU in `DAEMON_STOP` and DB-14 includes the commands the daemon ran (r3, HF-18) | runtime | Observer proposal A2 |
 | Watchdog pings from the main loop only, so a hang starves them | runtime, notify | Proposal C1 |
 | Errors recorded as category and exception class only, never messages; repeats collapsed | runtime | WBS 3.0 FL4 |
-| Git with no user or system config, no pager, colour, fsmonitor or external diff; private index copy on request | proc | v0.3 §3.8; script-board F3, F4, F5 |
+| Git with no user or system config, no pager, colour, fsmonitor, external diff or textconv; read-only subcommands only; private index copy on request (r3: HF-01, HF-02, HF-19) | proc | v0.3 §3.8; script-board F3, F4, F5 |
 | Bounded command output, process-group kill on timeout, stderr discarded | proc | v0.3 §3.8; WBS 3.0 FL4 |
-| Sandboxed system unit: exposure 0.4 ("SAFE") for the example under `systemd-analyze security --offline` | unitgen | v0.3 §4; dev-agents C11 |
+| Sandboxed system unit: exposure 0.4 ("SAFE") for the example under `systemd-analyze security --offline`; its seccomp filter permits the Landlock syscalls start-up needs (r3, HF-07) | unitgen | v0.3 §4; dev-agents C11 |
 
 ### Three layers, and what each cannot catch
 
@@ -131,7 +157,7 @@ The code may import only `bisect collections dataclasses enum functools hashlib 
 | DB-01 | Manifest validates | Closed schema holds |
 | DB-02 | Purity | No findings |
 | DB-03 | Confinement | 5 cycles with the audit hook recording: zero events, no file outside the output dir changed |
-| DB-04 | Ledger integrity and provenance | Chain verifies; starts with `DAEMON_START`, ends with `DAEMON_STOP`; hashes of manifest and code match |
+| DB-04 | Ledger integrity and provenance | Chain verifies; starts with `DAEMON_START`, ends with `DAEMON_STOP`; hashes of manifest and code match; **no `DAEMON_ERROR` in this clean run** (r3, HF-16) |
 | DB-05 | Crash and restart | 8 SIGKILLs at seeded random times, then a clean run: chain verifies; every restart records the unclean stop |
 | DB-06 | Torn tails | Garbage, and a complete record without its newline, are both quarantined byte for byte and recorded |
 | DB-07 | Corrupt ledger | One flipped byte mid-ledger: exit 65, bytes unchanged, nothing quarantined |
@@ -142,16 +168,20 @@ The code may import only `bisect collections dataclasses enum functools hashlib 
 | DB-12 | Single instance, SIGTERM | Second instance exits 73; SIGTERM gives `DAEMON_STOP` and exit 0 |
 | DB-13 | Audit hook | Ten forbidden operations blocked and counted for this manifest; output-dir write allowed |
 | DB-14 | Resource budget | Self-measured CPU per cycle, projected to the real interval, and peak RSS within the manifest |
-| DB-15 | Unit hardening | Every required directive present; `systemd-analyze` exposure at or under 2.0 |
+| DB-15 | Unit hardening | Every required directive present; `systemd-analyze` exposure at or under 2.0; the unit's resolved `SystemCallFilter` permits every start-up syscall (r3, HF-07) |
 | DB-16 | Read-only verification | Two verifications agree; ledger bytes and mtime unchanged |
 | DB-17 | Landlock enforces alone (r2) | With the audit hook in record-only mode, the kernel still blocks the forbidden write and the denied read; N/A below Landlock ABI 2 |
 | DB-18 | `DAEMON_START.landlock` is honest (r2) | Its `abi` and `gaps` match a fresh in-process check on this host, for a clean single-cycle run |
 
-The verdict is PASS only if nothing fails and nothing is UNKNOWN; otherwise FAIL or INCOMPLETE. N/A does not block a PASS (DB-17 when Landlock is unavailable). A JSON report (`spark-daemon-battery/1`) records every check, the seed and the environment.
+The verdict is PASS only if nothing fails and nothing is UNKNOWN; otherwise FAIL or INCOMPLETE. N/A does not block a PASS (DB-17 when Landlock is unavailable). A JSON report (`spark-daemon-battery/1`) records every check, the seed, the environment and (r3) the contract identity. With `--envelope`, it also quotes the candidate envelope; if the envelope does not match the files that were run, the verdict cannot be PASS.
+
+A daemon that reads under `~` ships a `fixture_home/` folder beside its manifest; the battery copies it into its disposable HOME, so the clean runs have something real to observe (see the reference daemons).
 
 ### Skeleton self-tests (the pattern itself)
 
-105 tests: canonical form, golden vector and RFC 8785 (JCS) key-order vectors (9), manifest refusals (15), ledger corruption categories, torn tails, uncertain commits and bounded memory (16), rendering including a 500-trial property test (10), output-dir checks and the audit hook in child processes (8), subprocess bounds and the F4/F5 Git regressions (5), end-to-end runtime behaviour including a watchdog-starvation test, polling jitter and Landlock's start-up refusal/PD-15 (18), Landlock enforcement itself under `os.fork()` isolation, real kernel rules for read, write, TCP and worker-style nested domains (12), and unit generation, purity, the battery against good and bad daemons, the GC-forcing structural guard, and a source-hygiene check for hidden characters (12).
+170 tests (r3): the r2 suite below, plus `test_hardening.py` (35: one or more per HARDENING.md finding, each failing on r2) and `test_handoff.py` (30: the published contract and its version pin, cross-Python determinism, JSON Schema agreement with `manifest.py`, candidate envelopes, validate --json, precheck, scaffold, symlink-safe stat, and the battery failing an always-erroring daemon).
+
+The r2 suite, 105 tests: canonical form, golden vector and RFC 8785 (JCS) key-order vectors (9), manifest refusals (15), ledger corruption categories, torn tails, uncertain commits and bounded memory (16), rendering including a 500-trial property test (10), output-dir checks and the audit hook in child processes (8), subprocess bounds and the F4/F5 Git regressions (5), end-to-end runtime behaviour including a watchdog-starvation test, polling jitter and Landlock's start-up refusal/PD-15 (18), Landlock enforcement itself under `os.fork()` isolation, real kernel rules for read, write, TCP and worker-style nested domains (12), and unit generation, purity, the battery against good and bad daemons, the GC-forcing structural guard, and a source-hygiene check for hidden characters (12).
 
 ## Evidence from this build (2026-09-27)
 
@@ -163,9 +193,31 @@ Environment: x86_64 Ubuntu 24.04.4 (workspace kernel 6.18.44), Python 3.12.3, Gi
 - Battery on the `sneaky` fixture (reads a denied path through `ctx` and swallows the error): FAIL; the daemon stops itself with exit 78 on its first cycle, as intended.
 - `DAEMON_START` now also carries `jitter_max_ms` (the ± bound on the poll sleep, PD-21) and `landlock` (`{abi, status, gaps}`, PD-15/L4), both disabled/zeroed deterministically in test mode.
 
+## 4. The handoff (r3)
+
+The full design is in `DAEMON-CONTRACT.md`; in brief:
+
+| Direction | Artifact | Command |
+| --- | --- | --- |
+| Pattern → author | The contract (`spark-daemon-contract/1`): everything a daemon must satisfy, with `contract_version` and `contract_sha256` | `describe`, `contract/daemon-contract.json` |
+| Pattern → author | The manifest JSON Schema | `schema`, `contract/manifest.schema.json` |
+| Pattern → author | A blank page that already passes the battery | `scaffold` |
+| Author → pattern | A candidate folder with `candidate.json` (`spark-daemon-candidate/1`): contract targeted, file digests, producer, intent; no result fields | `envelope` |
+| Pattern → author | Feedback: `spark-daemon-validate/1` (ms), `spark-daemon-precheck/1` (~1 s, OK/FAIL) | `validate --json`, `precheck` |
+| Pattern → human | Evidence: `spark-daemon-battery/1` (~15 s); only its PASS is admissible | `battery --envelope` |
+
+## Evidence from r3 (2026-09-27)
+
+Same workspace (x86_64, kernel 6.18.44, Landlock ABI 7, systemd 255, strace 6.8, Git 2.43.0). Files in `evidence/r3/`.
+
+- Self-tests: 170 of 170 pass on Python 3.12.3 with `jsonschema` installed (schema-agreement tests active), and on 3.10 and 3.13 with those 4 tests skipped. r2's 105 also pass unchanged.
+- Battery: `meminfo-watch`, `disk-watch`, `dir-watch` and `git-watch` each PASS 18 of 18. DB-15 now also reports "start-up syscalls permitted by the unit's seccomp filter". DB-14 CPU includes child processes: `git-watch` 11.5 ms per cycle, the others about 4 to 4.5 ms; peak RSS about 20.5 to 20.8 MiB against the 64 MiB floor.
+- `contract_sha256` `ef03a744…` is identical on Python 3.10, 3.11, 3.12 and 3.13.
+- Every escape in HARDENING.md was first reproduced on the unmodified r2 package; each has a regression test.
+
 ## Decisions for adjudication
 
-Each ends with a recommendation and a decision line, as in the WBS 3.0 spec. Record rulings in the decision log below.
+Each ends with a recommendation and a decision line, as in the WBS 3.0 spec. Record rulings in the decision log below. **PD-23 to PD-31 (r3: the contract, versioning, Git `safe.directory`, the candidate envelope, evidence lanes, DB-04's zero-error rule, contract 1.0.0's rule set, the unit's Landlock syscalls, and the kernel-v2 authoring boundary) are set out in `DAEMON-CONTRACT.md` section 10.**
 
 **PD-01. Observe-only in v1.** `daemon_class: act` is reserved and refused.
 Recommendation: APPROVE. Decision: PENDING
@@ -221,9 +273,10 @@ Recommendation: APPROVE. Decision: PENDING
 
 ## Known limits
 
-- The audit hook is not a sandbox, and the purity check is syntactic. The systemd unit is the security boundary.
+- The audit hook is not a sandbox, and the purity check is syntactic. The systemd unit is the security boundary. r3 closed every purity route found in review (HARDENING.md HF-03 to HF-06), each now a named rule and a test, but it cannot prove none remain; Landlock stays the backstop (DB-17).
+- A watched repository's own Git config is trusted once `safe.directory` names it (PD-25): a filter driver can still run during `status`/`diff` on its worktree, contained by Landlock and the unit. Prefer bare mirrors for repositories the owner does not control (HARDENING.md, residual risk 1).
 - The hook does not enforce the read list for the interpreter itself; `ctx` enforces it for daemon code, and the unit's `ProtectSystem`, `ProtectHome` and `InaccessiblePaths` cover the process.
-- Nothing has run under systemd for real yet: the watchdog is tested with a stand-in notify socket and the unit is scored offline.
+- Nothing has run under systemd for real yet: the watchdog is tested with a stand-in notify socket and the unit is scored offline. The r3 seccomp fix (HF-07) comes from `systemd-analyze syscall-filter` group membership and is checked by DB-15, but a real PID 1 start is the first DGX step (DAEMON-CONTRACT.md section 11).
 - User units on Ubuntu 24.04 are generated with a warning; their sandboxing is unverified.
 - DB-05's random kills rarely land mid-write; DB-06 covers torn tails deterministically.
 - The CPU projection leaves out start-up cost and is measured with a 200 ms test interval.
@@ -240,6 +293,7 @@ Recommendation: APPROVE. Decision: PENDING
 | r1 | 2026-09-27 | Claude | First draft: manifest, skeleton, conformance battery, self-tests, reference daemon |
 | r2 | 2026-09-27 | Claude | Draft adjudication of external proposals AP-01 to AP-04 with Landlock and JCS evidence; PD-15 to PD-20; IF-01 noted. No code change |
 | r2 (implemented) | 2026-09-27 | Claude | Implemented and self-tested the parts of r2 with a clear draft verdict: `landlock.py` (AP-01, wired into start-up before the audit hook, DB-17/DB-18 added), JCS key ordering (AP-03/J1), the 64 MB memory floor (IF-01/PD-20). Adjudicated and implemented two further same-day proposals: polling jitter (PD-21) and per-cycle GC forcing (PD-22), and corrected a fabricated "4 MiB ledger constant" claim in one submission's math (see PD-20's note). AP-04 (S1-S7) remains design-only. 105 of 105 self-tests and 18 of 18 battery checks pass under real Landlock enforcement (ABI 7). Still nothing here is a Class C ruling — every PD stays PENDING until the human records one. |
+| r3 | 2026-09-27 | Claude | Review, bug hunt and hardening of r2 as received (`HARDENING.md`): 22 defects reproduced on r2 and fixed, each with a regression test. Among them: Git global-option injection through `ctx.git`/`ctx.run` (arbitrary command execution), purity escapes (private attributes, which leaked a denied path; frame introspection; aliasing), a unit whose seccomp filter blocked Landlock (the daemon could never have started once installed), Git's ownership check failing every call under a dedicated user, silent `SystemExit`, `mtime_ns` overflowing the canonical range, and a battery that passed always-failing daemons. Added the handoff layer (`DAEMON-CONTRACT.md`): `describe`/`schema` with contract 1.0.0 and a test-pinned `contract_sha256`, `validate --json`, `precheck`, `scaffold`, candidate envelopes with no authority, `battery --envelope`. Three reference daemons (`disk-watch`, `dir-watch`, `git-watch`). Makefile and CI. Skeleton version 0.3.0. 170 of 170 self-tests; 4 × 18 of 18 battery checks. PD-23 to PD-31 added; every PD still PENDING. |
 
 ## Decision log
 
