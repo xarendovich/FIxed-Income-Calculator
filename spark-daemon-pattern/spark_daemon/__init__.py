@@ -1,0 +1,41 @@
+"""Spark daemon pattern, v0.1 draft for review and adjudication.
+
+A daemon built from this pattern is declared by a manifest (manifest.py), runs inside a
+fixed skeleton (runtime.py and the modules it uses), and must pass the conformance
+battery (battery.py) before anyone activates it. Nothing in this package installs,
+enables or starts a service; the unit generator only prints text for a human to review.
+"""
+
+VERSION = "0.1.0"
+
+MANIFEST_SCHEMA = "spark-daemon-manifest/1"
+LEDGER_SCHEMA = "spark-daemon-ledger/1"
+BATTERY_SCHEMA = "spark-daemon-battery/1"
+
+# Event types the skeleton itself writes. A manifest may not declare them.
+RESERVED_EVENT_TYPES = (
+    "DAEMON_START",
+    "DAEMON_STOP",
+    "DAEMON_ERROR",
+    "DAEMON_ERROR_CLEARED",
+    "LEDGER_TAIL_QUARANTINED",
+)
+
+# Fixed file names inside a daemon's output directory.
+LEDGER_NAME = "ledger.jsonl"
+DIGEST_NAME = "digest.md"
+LOCK_NAME = "daemon.lock"
+QUARANTINE_DIR = "quarantine"
+TMP_DIR = "tmp"
+KNOWN_OUTPUT_ENTRIES = frozenset({LEDGER_NAME, DIGEST_NAME, LOCK_NAME, QUARANTINE_DIR, TMP_DIR})
+TMP_PREFIX = ".tmp-"
+
+# Exit codes. 0-3 follow the script contract (SC2); the rest follow sysexits.h.
+EXIT_OK = 0
+EXIT_FAILED = 1
+EXIT_USAGE = 2
+EXIT_FLAGGED = 3
+EXIT_LEDGER_CORRUPT = 65      # EX_DATAERR: refuse to start, change nothing
+EXIT_UNCERTAIN_COMMIT = 70    # EX_SOFTWARE: a ledger write or fsync failed; recovery decides on restart
+EXIT_ALREADY_RUNNING = 73     # EX_CANTCREAT: another instance holds the lock
+EXIT_POLICY = 78              # EX_CONFIG: output directory unsafe, or a policy violation (fail closed)
