@@ -1,6 +1,7 @@
 # Spark daemon pattern — v0.3 (r3) draft for review
 
 - **Status:** DRAFT FOR ADJUDICATION. Nothing here is approved, installed or running anywhere. r3 is implemented and self-tested: 170 of 170 tests pass on Python 3.10, 3.11, 3.12 and 3.13, and all four reference daemons pass 18 of 18 battery checks on this workspace's kernel (Landlock ABI 7). That is evidence for the human's Class C ruling, not the ruling itself. Every PD (PD-01 to PD-31) is still PENDING until recorded in the decision log.
+- **r3.1 (2026-09-28):** cross-checked against the Spark handoffs (WBS 3.0 r3, 3.0C.1, 3.0A.2, 3.0E.1, WBS 2.5, Observer v0.2, the script board, H-Track, Kernel v0.2 Stage A). One Git code-execution path closed (HARDENING.md HF-24, contract 1.0.1); conformance gaps against WBS 3.0 r3 and PD-32 to PD-42 in `ADJUDICATION-SPARK-SOURCES.md`.
 - **r3 in one line:** a review that reproduced and fixed 22 defects, including two confinement escapes (`HARDENING.md`), plus a published, versioned daemon contract and a candidate handoff that carries no authority (`DAEMON-CONTRACT.md`).
 - **Revision:** r3, 2026-09-27 (see the revision history; r2 below for context). r2, 2026-09-27, drafted by Claude from Observer v0.3, the WBS 3.0 spec (r2), the Observer Improvement Proposal and the Spark Script Repository board. r2 adjudicates four external proposals (`ADJUDICATION-AP.md`, PD-15 to PD-20) plus two further ones submitted the same day (polling jitter and per-cycle GC forcing, PD-21 to PD-22), and implements the parts with a clear draft verdict: Landlock (AP-01), JCS key ordering (AP-03/J1), the 64 MB memory floor (IF-01/PD-20), polling jitter and GC forcing. The out-of-process supervisor/worker split (AP-04, S1-S7) stays a design only in `ADJUDICATION-AP.md` — none of it is built yet.
 - **Adjudicated by:**
@@ -17,6 +18,7 @@ spark-daemon-pattern/
   ADJUDICATION-AP.md        draft adjudication of external proposals AP-01..AP-04 (r2)
   HARDENING.md              r3 review: 22 reproduced defects, fixes, tests, residual risks
   DAEMON-CONTRACT.md        r3 handoff design: contract, candidate envelope, evidence lanes, PD-23..PD-31
+  ADJUDICATION-SPARK-SOURCES.md  r3.1 cross-check against the Spark handoffs: r3 conformance, PD-32..PD-42
   Makefile                  test | contract | check-contract | validate/precheck/battery-examples | evidence
   bin/spark-daemon          entry point; works under python3 -I -B (isolated, no bytecode)
   contract/                 generated, never hand-edited: daemon-contract.json, manifest.schema.json,
@@ -217,7 +219,7 @@ Same workspace (x86_64, kernel 6.18.44, Landlock ABI 7, systemd 255, strace 6.8,
 
 ## Decisions for adjudication
 
-Each ends with a recommendation and a decision line, as in the WBS 3.0 spec. Record rulings in the decision log below. **PD-23 to PD-31 (r3: the contract, versioning, Git `safe.directory`, the candidate envelope, evidence lanes, DB-04's zero-error rule, contract 1.0.0's rule set, the unit's Landlock syscalls, and the kernel-v2 authoring boundary) are set out in `DAEMON-CONTRACT.md` section 10.**
+Each ends with a recommendation and a decision line, as in the WBS 3.0 spec. Record rulings in the decision log below. **PD-32 to PD-42 (r3.1: conformance to WBS 3.0 r3, digest semantics, convergence on the Observer's writer, one exit-code table, lifecycle rules, KECC vocabulary, digest-bound activation) are in `ADJUDICATION-SPARK-SOURCES.md` section 7.** **PD-23 to PD-31 (r3: the contract, versioning, Git `safe.directory`, the candidate envelope, evidence lanes, DB-04's zero-error rule, contract 1.0.0's rule set, the unit's Landlock syscalls, and the kernel-v2 authoring boundary) are set out in `DAEMON-CONTRACT.md` section 10.**
 
 **PD-01. Observe-only in v1.** `daemon_class: act` is reserved and refused.
 Recommendation: APPROVE. Decision: PENDING
@@ -294,6 +296,7 @@ Recommendation: APPROVE. Decision: PENDING
 | r2 | 2026-09-27 | Claude | Draft adjudication of external proposals AP-01 to AP-04 with Landlock and JCS evidence; PD-15 to PD-20; IF-01 noted. No code change |
 | r2 (implemented) | 2026-09-27 | Claude | Implemented and self-tested the parts of r2 with a clear draft verdict: `landlock.py` (AP-01, wired into start-up before the audit hook, DB-17/DB-18 added), JCS key ordering (AP-03/J1), the 64 MB memory floor (IF-01/PD-20). Adjudicated and implemented two further same-day proposals: polling jitter (PD-21) and per-cycle GC forcing (PD-22), and corrected a fabricated "4 MiB ledger constant" claim in one submission's math (see PD-20's note). AP-04 (S1-S7) remains design-only. 105 of 105 self-tests and 18 of 18 battery checks pass under real Landlock enforcement (ABI 7). Still nothing here is a Class C ruling — every PD stays PENDING until the human records one. |
 | r3 | 2026-09-27 | Claude | Review, bug hunt and hardening of r2 as received (`HARDENING.md`): 22 defects reproduced on r2 and fixed, each with a regression test. Among them: Git global-option injection through `ctx.git`/`ctx.run` (arbitrary command execution), purity escapes (private attributes, which leaked a denied path; frame introspection; aliasing), a unit whose seccomp filter blocked Landlock (the daemon could never have started once installed), Git's ownership check failing every call under a dedicated user, silent `SystemExit`, `mtime_ns` overflowing the canonical range, and a battery that passed always-failing daemons. Added the handoff layer (`DAEMON-CONTRACT.md`): `describe`/`schema` with contract 1.0.0 and a test-pinned `contract_sha256`, `validate --json`, `precheck`, `scaffold`, candidate envelopes with no authority, `battery --envelope`. Three reference daemons (`disk-watch`, `dir-watch`, `git-watch`). Makefile and CI. Skeleton version 0.3.0. 170 of 170 self-tests; 4 × 18 of 18 battery checks. PD-23 to PD-31 added; every PD still PENDING. |
+| r3.1 | 2026-09-28 | Claude | Cross-check against the Spark handoffs (`ADJUDICATION-SPARK-SOURCES.md`). Fixed HF-24: `ctx.git` now carries the Observer's WBS 2.5 hardened profile (signature verification and mailmap off, replace refs, grafts and lazy fetch neutralized); a repository's own `gpg.program` had been reachable through `log`/`show`, reproduced. Contract 1.0.1. Recorded conformance gaps against WBS 3.0 r3 (no startup fsync, crash-idempotent quarantine, origin-record check, artifact FS6), WBS 3.0E.1's review of this pattern (exit-code collision, lifecycle, sense budget, PD-22), and PD-32 to PD-42. Nothing else changed in code. |
 
 ## Decision log
 

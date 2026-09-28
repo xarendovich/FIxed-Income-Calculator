@@ -145,6 +145,71 @@ class GitHardeningTests(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("git", path="/usr/bin:/bin"), "git not installed")
+class GitHistoryIntegrityTests(unittest.TestCase):
+    """The Observer's WBS 2.5 hardened Git profile (A1, evidence E1-E3), adopted for ctx.git
+    after a cross-check against the Spark handoffs: each case was reproduced against r3."""
+
+    GIT = {"git": "/usr/bin/git"}
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.repo = os.path.join(self.tmp, "r")
+        self.env = {"PATH": "/usr/bin:/bin", "HOME": self.tmp, "GIT_CONFIG_GLOBAL": "/dev/null",
+                    "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                    "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+        self.g("init", "-q", "-b", "main", self.repo, cwd=self.tmp)
+        for i in range(3):
+            self.g("commit", "-q", "--allow-empty", "-m", f"c{i}")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def g(self, *args, cwd=None, data=None):
+        return subprocess.run(["git", *args], cwd=cwd or self.repo, env=self.env, input=data,
+                              capture_output=True, check=True).stdout.decode().strip()
+
+    def ctx_git(self, *args):
+        return proc.git(self.repo, list(args), executables=self.GIT, timeout=10, max_bytes=65536)
+
+    def test_repository_gpg_program_never_runs(self):
+        raw = self.g("cat-file", "commit", "HEAD")
+        head, _, msg = raw.partition("\n\n")
+        signed = (head + "\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAd\n =AAAA\n"
+                  " -----END PGP SIGNATURE-----\n\n" + msg + "\n")
+        oid = self.g("hash-object", "-t", "commit", "-w", "--stdin", data=signed.encode())
+        self.g("update-ref", "HEAD", oid)
+        sentinel = os.path.join(self.tmp, "SENTINEL")
+        script = os.path.join(self.tmp, "gpg.sh")
+        with open(script, "w") as fh:
+            fh.write(f"#!/bin/sh\ntouch {sentinel}\nexit 1\n")
+        os.chmod(script, 0o755)
+        self.g("config", "log.showSignature", "true")
+        self.g("config", "gpg.program", script)
+        subprocess.run(["git", "log", "-1"], cwd=self.repo, env=self.env, capture_output=True)
+        self.assertTrue(os.path.exists(sentinel), "fixture must prove plain git runs gpg.program")
+        os.remove(sentinel)
+        for args in (["log", "-1", "--pretty=format:%s"], ["show", "-s", "HEAD"]):
+            with self.subTest(args=args):
+                self.assertEqual(self.ctx_git(*args).returncode, 0)
+                self.assertFalse(os.path.exists(sentinel))
+
+    def test_replace_refs_do_not_forge_history(self):
+        self.g("commit", "-q", "--allow-empty", "-m", "forged")
+        forged = self.g("rev-parse", "HEAD")
+        self.g("reset", "-q", "--hard", "HEAD~1")
+        self.g("replace", self.g("rev-parse", "HEAD"), forged)
+        self.assertEqual(self.g("log", "-1", "--pretty=format:%s"), "forged")    # the fixture is real
+        self.assertEqual(self.ctx_git("log", "-1", "--pretty=format:%s").stdout, "c2")
+        self.assertEqual(self.ctx_git("rev-list", "--count", "HEAD").stdout.strip(), "3")
+
+    def test_grafts_do_not_rewrite_ancestry(self):
+        with open(os.path.join(self.repo, ".git", "info", "grafts"), "w") as fh:
+            fh.write(self.g("rev-parse", "HEAD") + "\n")
+        self.assertEqual(self.g("rev-list", "--count", "HEAD"), "1")            # the fixture is real
+        self.assertEqual(self.ctx_git("rev-list", "--count", "HEAD").stdout.strip(), "3")
+
+
+@unittest.skipUnless(shutil.which("git", path="/usr/bin:/bin"), "git not installed")
 class GitInjectionRuntimeTests(unittest.TestCase):
     """End to end: the r2 injection ran `id` through ctx.git(["-c", "alias.y=!..."]).
     Now the call is refused, counted as a violation, and the daemon fails closed (78)."""

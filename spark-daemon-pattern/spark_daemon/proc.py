@@ -30,9 +30,18 @@ SAFE_ENV = {
     "PAGER": "cat",
 }
 
-# Every Git call: no pager, no colour, no fsmonitor hook, raw paths (v0.3 section 3.8).
+# Every Git call: no pager, no colour, no fsmonitor hook, raw paths (v0.3 section 3.8), and
+# the Observer's WBS 2.5 hardened-profile additions (A1, evidence E1): a repository's own
+# log.showSignature + gpg.program otherwise runs a program during `git log` / `git show`
+# (reproduced against r3's ctx.git), and log.mailmap rewrites identities. Command-line -c
+# outranks repository config.
 GIT_BASE = ("--no-pager", "-c", "color.ui=never", "-c", "core.fsmonitor=false",
-            "-c", "core.quotepath=off", "-c", "core.pager=cat")
+            "-c", "core.quotepath=off", "-c", "core.pager=cat",
+            "-c", "log.showSignature=false", "-c", "log.mailmap=false")
+# Environment for every Git call (WBS 2.5 A1, E2/E3): replace refs show forged metadata and
+# ancestry under genuine SHAs, grafts rewrite ancestry and survive --no-replace-objects, and a
+# partial clone would fetch missing objects over the network during a read.
+GIT_ENV = {"GIT_NO_REPLACE_OBJECTS": "1", "GIT_GRAFT_FILE": "/dev/null", "GIT_NO_LAZY_FETCH": "1"}
 # Diff-producing Git calls additionally (v0.3 section 3.8; script-board F3).
 GIT_DIFF_FLAGS = ("--no-ext-diff", "--no-textconv", "--no-renames", "--no-color")
 
@@ -189,20 +198,20 @@ def git(repo, args, *, executables, timeout, max_bytes, tmp_dir=None, index_copy
     base = git_base(repo)
     argv = ["git", "-C", repo, *base, *args]
     if not index_copy:
-        return run(argv, executables=executables, timeout=timeout, max_bytes=max_bytes)
+        return run(argv, executables=executables, timeout=timeout, max_bytes=max_bytes, extra_env=GIT_ENV)
     if tmp_dir is None:
         raise ValueError("index_copy needs tmp_dir")
     where = run(["git", "-C", repo, *base, "rev-parse", "--path-format=absolute", "--git-path", "index"],
-                executables=executables, timeout=timeout, max_bytes=4096)
+                executables=executables, timeout=timeout, max_bytes=4096, extra_env=GIT_ENV)
     index_path = where.stdout.strip()
     if where.returncode != 0 or not index_path:
-        return run(argv, executables=executables, timeout=timeout, max_bytes=max_bytes)
+        return run(argv, executables=executables, timeout=timeout, max_bytes=max_bytes, extra_env=GIT_ENV)
     copy_path = os.path.join(tmp_dir, f"index-copy-{os.getpid()}-{time.monotonic_ns()}")
     try:
         if os.path.exists(index_path):
             shutil.copyfile(index_path, copy_path)
         return run(argv, executables=executables, timeout=timeout, max_bytes=max_bytes,
-                   extra_env={"GIT_INDEX_FILE": copy_path})
+                   extra_env={**GIT_ENV, "GIT_INDEX_FILE": copy_path})
     finally:
         if os.path.exists(copy_path):
             os.remove(copy_path)

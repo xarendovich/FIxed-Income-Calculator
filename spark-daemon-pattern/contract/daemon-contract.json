@@ -1,7 +1,7 @@
 {
   "schema": "spark-daemon-contract/1",
-  "contract_version": "1.0.0",
-  "contract_sha256": "ef03a744961cfad81abced56b0c12b18b222ce3219d779e5f6f79a64319fb585",
+  "contract_version": "1.0.1",
+  "contract_sha256": "af8f169e290887ee8ffaad013365d5bfde5a39a9b2991bd40f0e142e9584d9d5",
   "skeleton_version": "0.3.0",
   "contract": {
     "manifest": {
@@ -655,8 +655,17 @@
         "-c",
         "core.quotepath=off",
         "-c",
-        "core.pager=cat"
-      ]
+        "core.pager=cat",
+        "-c",
+        "log.showSignature=false",
+        "-c",
+        "log.mailmap=false"
+      ],
+      "environment_always_set": {
+        "GIT_GRAFT_FILE": "/dev/null",
+        "GIT_NO_LAZY_FETCH": "1",
+        "GIT_NO_REPLACE_OBJECTS": "1"
+      }
     },
     "digest": {
       "label_pattern": "^[A-Za-z0-9][A-Za-z0-9 .,:()/%+-]{0,63}$",

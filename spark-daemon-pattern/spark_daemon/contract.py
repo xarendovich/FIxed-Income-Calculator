@@ -28,7 +28,7 @@ from . import proc, purity, render
 from .canonical import MAX_SAFE_INT, canonical_bytes, sha256_hex
 
 CONTRACT_SCHEMA = "spark-daemon-contract/1"
-CONTRACT_VERSION = "1.0.0"
+CONTRACT_VERSION = "1.0.1"
 CANDIDATE_SCHEMA = "spark-daemon-candidate/1"
 VALIDATE_SCHEMA = "spark-daemon-validate/1"
 PRECHECK_SCHEMA = "spark-daemon-precheck/1"
@@ -277,6 +277,7 @@ def contract_body() -> dict:
                             "no %G signature placeholders in --format/--pretty",
                             "safe.directory is set to exactly the declared repository"],
             "global_options_always_set": list(proc.GIT_BASE),
+            "environment_always_set": dict(sorted(proc.GIT_ENV.items())),
         },
         "digest": {
             "label_pattern": render.LABEL_RE.pattern,
