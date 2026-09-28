@@ -367,6 +367,53 @@ class RuntimeHardeningTests(unittest.TestCase):
             sb.cleanup()
             shutil.rmtree(fixture)
 
+    def test_rejected_duplicate_launch_touches_nothing(self):
+        # r3.2 (WBS 3.1 §4.2): the second instance cleaned tmp/ before taking the lock and
+        # deleted the running instance's in-flight files (for git-watch, its index copy).
+        sb = Sandbox("counter")
+        try:
+            first = subprocess.Popen(
+                [sys.executable, "-I", "-B", ENTRY, "run", "--manifest", sb.manifest],
+                env=sb.env(SPARK_DAEMON_TEST_INTERVAL_MS="60000"), stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL)
+            try:
+                ledger = sb.ledger_path
+                for _ in range(100):
+                    if os.path.exists(ledger) and os.path.getsize(ledger):
+                        break
+                    import time
+                    time.sleep(0.05)
+                inflight = os.path.join(sb.output, "tmp", "index-copy-inflight")
+                with open(inflight, "w") as fh:
+                    fh.write("in use")
+                p = sb.run(cycles=1)
+                self.assertEqual(p.returncode, 73, p.stderr)
+                self.assertTrue(os.path.exists(inflight), "a rejected duplicate deleted a running instance's file")
+            finally:
+                first.terminate()
+                first.wait(timeout=15)
+        finally:
+            sb.cleanup()
+
+    def test_torn_first_write_still_starts_the_ledger_with_daemon_start(self):
+        # r3.2 (WBS 3.0 r4's pre-baseline correction): a crash during the first-ever append left
+        # bytes but no complete record; the next start wrote LEDGER_TAIL_QUARANTINED as seq 1, a
+        # ledger the battery's own DB-04 then rejected ("first record is not DAEMON_START").
+        sb = Sandbox("counter")
+        try:
+            os.makedirs(sb.output, mode=0o700, exist_ok=True)
+            fd = os.open(sb.ledger_path, os.O_WRONLY | os.O_CREAT, 0o600)
+            os.write(fd, b'{"schema":"spark-daemon-ledger/1","seq":1')
+            os.close(fd)
+            p = sb.run(cycles=1)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            recs = sb.records()
+            self.assertEqual([r["event_type"] for r in recs[:2]], ["DAEMON_START", "LEDGER_TAIL_QUARANTINED"])
+            self.assertIs(recs[0]["payload"]["previous_run_ended_cleanly"], False)
+            self.assertEqual(recs[1]["payload"]["length"], 41)
+        finally:
+            sb.cleanup()
+
     def test_policy_is_immutable(self):
         sb = Sandbox("counter")
         try:

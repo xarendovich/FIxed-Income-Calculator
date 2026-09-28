@@ -50,6 +50,8 @@ class OutputDirTests(unittest.TestCase):
         stray = os.path.join(out, "tmp", "index-copy-1")
         open(stray, "w").close()
         guard.prepare_output_dir(out)
+        self.assertTrue(os.path.exists(stray))        # preparation runs before the lock: never deletes
+        guard.remove_stray_temp_files(out)            # the runtime calls this while holding the lock
         self.assertFalse(os.path.exists(stray))
 
     def test_inventory_reports_foreign_files(self):

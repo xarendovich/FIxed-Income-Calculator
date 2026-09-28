@@ -128,7 +128,12 @@ def count_violation(kind: str) -> None:
 
 
 def prepare_output_dir(path: str) -> None:
-    """Create the output directory (0700) or refuse an unsafe one. Never chmods silently."""
+    """Create the output directory (0700) or refuse an unsafe one. Never chmods silently.
+
+    Creates and checks only; it never deletes anything, because it runs before the
+    single-instance lock is taken. A rejected duplicate launch must leave the running
+    instance's artifacts untouched (WBS 3.1 §4.2; r3.2: the cleanup below used to run here
+    and deleted the running instance's in-flight tmp/ files)."""
     os.makedirs(path, mode=0o700, exist_ok=True)
     _check_dir(path, "output_dir")
     for sub in (QUARANTINE_DIR, TMP_DIR):
@@ -136,11 +141,6 @@ def prepare_output_dir(path: str) -> None:
         if not os.path.lexists(full):
             os.mkdir(full, 0o700)
         _check_dir(full, sub)
-    tmp = os.path.join(path, TMP_DIR)
-    for entry in os.listdir(tmp):                 # stray files from a crash: removed, never read
-        full = os.path.join(tmp, entry)
-        if os.path.isfile(full) and not os.path.islink(full):
-            os.remove(full)
 
 
 def _check_dir(path, label):
@@ -156,11 +156,18 @@ def _check_dir(path, label):
 
 
 def remove_stray_temp_files(path: str) -> None:
+    """Remove temp files a crashed run left behind: digest temps in the output directory and
+    everything in tmp/. Removed, never read. Only ever called while holding the lock."""
     for entry in os.listdir(path):
         if entry.startswith(TMP_PREFIX):
             full = os.path.join(path, entry)
             if os.path.isfile(full) and not os.path.islink(full):
                 os.remove(full)
+    tmp = os.path.join(path, TMP_DIR)
+    for entry in os.listdir(tmp):
+        full = os.path.join(tmp, entry)
+        if os.path.isfile(full) and not os.path.islink(full):
+            os.remove(full)
 
 
 def inventory(path: str) -> list:

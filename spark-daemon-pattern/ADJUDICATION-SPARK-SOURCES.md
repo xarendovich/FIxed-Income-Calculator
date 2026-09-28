@@ -1,7 +1,7 @@
-# Daemon pattern × Spark handoffs — cross-check for adjudication (r3.1)
+# Daemon pattern × Spark handoffs — cross-check for adjudication (r3.2)
 
-- **Status:** DRAFT FOR ADJUDICATION, a companion to `README.md`, `HARDENING.md` and `DAEMON-CONTRACT.md`. One item (SX-01) is implemented because it is a reproduced security defect. Everything else is a recommendation, and PD-32 to PD-42 are PENDING.
-- **Revision:** r3.1, 2026-09-28, by Claude.
+- **Status:** DRAFT FOR ADJUDICATION, a companion to `README.md`, `HARDENING.md` and `DAEMON-CONTRACT.md`. Three items are implemented because each is a reproduced defect: SX-01 (security, r3.1); SX-02 (a duplicate launch deleted the running instance's files) and SX-03 (a torn first write produced a ledger the battery rejects), both r3.2. Everything else is a recommendation, and PD-32 to PD-45 are PENDING.
+- **Revision:** r3.2, 2026-09-28, by Claude. r3.2 adds the WBS 3.1 final adjudicated contract (section 4a) and the WBS 3.0 r4 closeout (section 4b), revises PD-34, PD-35 and PD-37 to follow them, and adds PD-43 to PD-45.
 - **Question asked:** is there language, contract or architectural design in the other Spark documents, including the completed WBS sections, that the daemon pattern should copy?
 - **Short answer:** yes, and more than borrowing. The daemon pattern's ledger and recovery code were drafted from the WBS 3.0 spec **r2**. Since then r3 was adjudicated (2026-09-26) and 3.0C.1 was frozen (2026-09-27), and both changed rules this pattern cites by ID. The Spark handoffs also closed a Git code-execution path that this pattern had not (SX-01, now fixed), and WBS 3.0E.1 had already reviewed this pattern once (section 4).
 
@@ -12,6 +12,8 @@
 | WBS 3.0 Artifact Writers boundary spec, **r3 adjudicated** (upload) | In full | Normative source for the ledger rules the README cites (CS, LG, VR, RC, DG, ES, FS, FL) |
 | WBS 3.0C.1 Durable Ledger Append Boundary, **FROZEN** at `f5ed529` (upload) | In full | The Observer's writer now exists: PD-02's replacement trigger |
 | WBS 3.0A.2 secondary reliability review handoff (upload) | In full | Read-side contract closure, torn-tail surface |
+| WBS 3.1 Observer Self-Protection, **final adjudicated contract** (upload, 2026-09-28) | In full | Singleton lease, signal contract, sense → gate → commit, exit reasons; its D-6 overrides the EX-01 recommendation |
+| WBS 3.0 **r4** Recovery Correction closeout, frozen at `d2785406` (upload, PDF, 2026-09-28) | In full | Pre-baseline recovery; receipt-first quarantine; the Observer's writer and recovery are now frozen, which moves PD-34 |
 | WBS 3.0E.1 Adjudicated Seam Contract (doc) | §1–4 and §8–14 in full; §5–7 skimmed | Its §8, §11 and §14 review this daemon pattern directly |
 | WBS 2.5 Baseline & HEAD Events handoff (doc) | In full | The hardened Git profile (A1, E1–E16) |
 | WBS 3.0 Artifact Writers handoff, r2-era (doc) | In full | Evidence W1–W12; consumer contract |
@@ -35,6 +37,15 @@ WBS 2.5 A1 and evidence E1–E3 showed that a repository's own configuration can
 - **E3:** `.git/info/grafts` made `rev-list --count` return 1 instead of 3.
 
 The fix adds `-c log.showSignature=false -c log.mailmap=false` to every call (command-line config outranks repository config), plus `GIT_NO_REPLACE_OBJECTS=1`, `GIT_GRAFT_FILE=/dev/null` and `GIT_NO_LAZY_FETCH=1`. Tests are in `tests/test_hardening.py::GitHistoryIntegrityTests`. All four cases fail without the fix and pass with it. Each fixture first proves that plain `git` is affected, so the test cannot pass vacuously. The contract moves to **1.0.1**: the enforced Git environment changed, but no rule a daemon must satisfy did.
+
+**SX-02. A rejected duplicate launch deleted the running instance's temp files (WBS 3.1 §4.2, reproduced).**
+WBS 3.1 §4.2: "A rejected duplicate launch MUST have no repository-observation or artifact-writing side effects." Reading the start-up order against that sentence found a violation. `guard.prepare_output_dir()` ran **before** the lock and deleted every file in `tmp/` plus any `.digest-*` temp in the output directory. It did this as crash cleanup, but a second launch did it too, before it discovered the lock was held, so it removed the files the running instance was writing (the index copy and digest temps). Reproduced: a first instance running, a file placed in its `tmp/`, a second launch exits 73 and the file is gone.
+The fix splits the function. `prepare_output_dir()` now only creates and checks directories. `remove_stray_temp_files()` does the cleanup and is called only after the lock is held. The test is `tests/test_hardening.py::RuntimeHardeningTests::test_rejected_duplicate_launch_touches_nothing`: it fails without the fix and passes with it. No contract change: this restores what the README already claimed.
+Residue, recorded not fixed: on a first-ever start the unlocked phase still creates the output directory, `quarantine/`, `tmp/` and `daemon.lock`. On a duplicate launch all four already exist, so nothing changes. D-5's objection to creating state just to take the lock is the subject of PD-44.
+
+**SX-03. A torn first-ever write produced a ledger the pattern's own battery rejects (WBS 3.0 r4, reproduced).**
+The r4 closeout describes a contradiction in r3. A crash during the very first append leaves bytes but no complete record. Treated as an ordinary torn tail, the recovery record becomes seq 1, which breaks the rule that the ledger starts with its origin record. The daemon pattern had the same defect. Reproduced: with a 41-byte torn first write, the next start wrote `LEDGER_TAIL_QUARANTINED` as seq 1 and `DAEMON_START` as seq 2, and DB-04 then failed that ledger ("first record is not DAEMON_START"). The failure was permanent, since every later run appends to the same ledger. That run's `DAEMON_START` also said `previous_run_ended_cleanly: null` ("no previous run"), though a previous run had started and crashed.
+The fix follows r4's adopted order. The origin record stays seq 1 and the recovery record comes after it: `DAEMON_START`, then `LEDGER_TAIL_QUARANTINED`, now for every torn tail, so every run begins with `DAEMON_START`. `previous_run_ended_cleanly` is `false` in this case. The test is `tests/test_hardening.py::RuntimeHardeningTests::test_torn_first_write_still_starts_the_ledger_with_daemon_start`: it fails without the fix and passes with it. No contract change, because the contract does not fix the order of lifecycle records. r4's receipt-first protocol, which makes the quarantine crash-idempotent, is still SC-02's subject and is not adopted here.
 
 ## 2. Conformance against WBS 3.0 r3 and 3.0C.1
 
@@ -89,6 +100,39 @@ E.1 §8, §11 and §14 reviewed this pattern while scoping the Observer's WBS 3.
 | EX-08 | Operational log contract (§14.5) | Conforms: stderr only, bounded, exception class never message, collapsed repeats | — |
 | EX-09 | `CPUWeight` only with watchdog headroom | Conforms: the `step_timeout` ≤ watchdog/2 rule plus DB-11's ping-gap check | — |
 
+## 4a. What the WBS 3.1 final contract changes
+
+WBS 3.1 (final, 2026-09-28) freezes the rules E.1 proposed for the Observer's process lifecycle. It binds the Observer only: §10 says "Generic daemon patterns do not control these Observer codes in v0.3", and D-6 declines to renumber the Observer for this pattern. Its rules are still the house design for a long-running Spark process, so this section compares the runtime against each one. The "today" column was checked by reading `runtime.py`, apart from WX-01, which was run.
+
+| ID | WBS 3.1 rule | Daemon pattern today | Recommendation |
+| --- | --- | --- | --- |
+| WX-01 | §4.2: the lease comes before any artifact mutation; a rejected duplicate launch has no side effects | Violated until r3.2 (SX-02). **Fixed**; only idempotent directory creation stays before the lock | — |
+| WX-02 | §4.1, §4.3: `flock` on a descriptor that is close-on-exec, never inherited; no PID files | Conforms: `flock(LOCK_EX|LOCK_NB)`, `O_CLOEXEC`, no PID file, children spawned with `close_fds=True` | E.1's structure test (PD-37) |
+| WX-03 | D-5, §4.4: the anchor is a **pre-existing directory** outside the observed repository; its path is checked against the locked inode at every safe point; loss fails closed | The anchor is the file `daemon.lock` inside the output directory, created on demand. It is never re-checked: if the output directory is renamed away and recreated, a second instance can lock a new inode and both run | Lock the output directory itself (it must already exist and pass FS2), and check `(st_dev, st_ino)` of the path against the locked descriptor once per cycle, exiting 78 on a mismatch (PD-44) |
+| WX-04 | §5, §3: handlers do nothing but set a plain stop flag and wake the loop; installed before the lock; `SIGTERM`, `SIGINT` **and `SIGHUP`** are equal; `READY` wakes **immediately** | Handlers only set state (conforms). But they are installed after recovery (EX-05); `SIGHUP` is not handled, so it kills the process with the default action; and the sleep loop polls in slices of at most `ping_every`, so a stop waits up to that long instead of waking | Install first, add `SIGHUP`, wake through `signal.set_wakeup_fd` plus `select` (PD-37) |
+| WX-05 | §6, §7: sense → gate → commit; a stop seen at the gate discards the intent; every durable prefix of a cycle is valid | No gate (EX-06). Each event is its own append, so every prefix is a valid ledger state already | Add the gate (PD-37); the prefix rule needs no change |
+| WX-06 | §8: a total sense deadline checked between bounded steps; the main loop is the only ping source; no heartbeat thread | Main loop only, no thread (conforms). No total deadline (EX-07) | PD-38 as written |
+| WX-07 | §11: refuses to run as root (`ROOT_REFUSED`, 78) | No check. The unit generator never runs as root, but a manual `spark-daemon run` as root would start | Refuse `geteuid() == 0` with 78 before the lock; a KECC-C1 addition (PD-43) |
+| WX-08 | §3: no synthetic stop event on any shutdown path (`OBSERVER_STOP` is forbidden) | **Deliberate divergence:** the skeleton writes `DAEMON_STOP` with CPU and peak memory, and `DAEMON_START.previous_run_ended_cleanly` is derived from it. It is a lifecycle record, not a repository-history event, which is the class 3.1 forbids | Keep; record as a divergence (PD-45) |
+| WX-09 | D-4: pings only after a cycle completes or is safely abandoned | **Deliberate divergence** (EX-02): the sleep loop also pings, because a daemon's interval may exceed `WatchdogSec`. Every ping still comes from the main thread | Keep; record as a divergence (PD-45) |
+| WX-10 | §10: symbolic reasons authoritative inside the process; one total boundary function maps them to codes; the mapping need not be one-to-one | Numeric constants returned directly from many places | Adopt the symbolic-reason form; see PD-35 for the numbers |
+| WX-11 | §9: operational logs are non-authoritative, bounded, stderr only; logging failure never changes an exit reason | Conforms (EX-08) | — |
+
+## 4b. What the WBS 3.0 r4 closeout changes
+
+r4 (frozen at `d2785406`, 410 tests) corrects WBS 3.0 recovery for the case before the first record exists and closes the Observer's recovery work. Its effect on this pattern follows. RX-01 and RX-04 were run; the rest were checked by reading.
+
+| ID | r4 rule | Daemon pattern | Recommendation |
+| --- | --- | --- | --- |
+| RX-01 | §2, §5.3: the origin record is seq 1 and the recovery record follows it; recovery never fabricates the origin record | Violated until r3.2 (SX-03). **Fixed** | — |
+| RX-02 | §5.2, §5.5: receipt-first preservation. The receipt is durable before the fragment is named; the fragment is hard-linked no-replace; identity, hash and length are revalidated before truncation; a match key of five fields finds the recovery event; exactly one `ftruncate` site | Copy, then truncate, then append later, with no receipt (SC-02) | r4 is the concrete protocol SC-02 asked for. PD-32 should adopt it by reference rather than design its own |
+| RX-03 | §5.2: `O_NOFOLLOW` descriptor; `fstat` type, owner, exact 0600, dev, ino, `st_nlink == 1`; bytes read from that same descriptor | Opened by path (SC-04) | Add the `nlink` rule to SC-04; a hard link to the ledger is otherwise undetected |
+| RX-04 | §5.6: no ledger, but a digest or quarantine fragment present, means ledger loss and fails closed | Reproduced: with the ledger deleted and a fragment in `quarantine/`, the runtime starts a new chain at seq 1 with `previous_run_ended_cleanly: null` and exits 0 | Refuse (65) when the ledger is absent but quarantine fragments exist, a KECC-C1 addition (PD-32) |
+| RX-05 | §9 known limit: deleting all of `history/` still looks like a first run until an off-host commitment exists | The same for the output directory | Already PD-40's off-host chain-head record; r4 confirms it is the only remedy |
+| RX-06 | §5.1: the first-run open path creates neither the ledger nor the digest | The ledger is created by the first append (conforms). The digest is rendered after every cycle | Nothing to change |
+
+**PD-34 has triggered.** The Observer's writer (3.0C.1) and its recovery (r4, R4.2C) are both frozen, and r4 found no need for a separate `observer_recovery.py`. The condition PD-34 waited for ("when WBS 3.0B freezes") has in effect been met. Two things still stand in the way of a drop-in replacement. First, the Observer's writer is shaped around `OBSERVER_BASELINE` and its own event types, so the adapter PD-34 describes has to be written. Second, the Observer is on a different host path (`~/spark-governance`), and this pattern must not import from it until someone decides how the code is shared.
+
 ## 5. What the Spark documents confirm the pattern already does well
 
 Worth recording so it is not relitigated: observe-only with no path to action (v0.2 §6.2, H-Track "declared, never authorized"); structure-safe, not prompt-safe rendering (r3 ES5 scope note); every limit and budget stated in bytes and checked; the full chain verified at every start (r3 VR6, A2 defect 1); no checkpoint file (r3 K1); tool versions on every start (Proposal B2); foreign files reported, never touched (Proposal B3); watchdog from the main loop (Proposal C1); inotify reserved as a wake-up only (C2); the `<1%` / 64 MB budget (A2); and the no-authority candidate rule, which is Step 9's "observation is not activation" applied to authorship.
@@ -107,16 +151,17 @@ Recommendation: APPROVE. Decision: PENDING
 **PD-33. Digest semantics** (SC-05). (a) Conform to r3: derive the digest only from committed records, stop the cycle on failure, regenerate at start. (b) Record a deliberate divergence: a daemon digest is a "current observation" view, stamped with the ledger head, with failures non-fatal. Option (b) keeps `digest(snapshot, recent)` meaningful. Option (a) makes a daemon digest provable from the ledger.
 Recommendation: MODIFY toward (b): keep the current semantics, name them in the contract, and add the stamp's snapshot-cycle number. Decision: PENDING
 
-**PD-34. Converge on the Observer's writer.** When WBS 3.0B freezes, replace `ledger.py` with `observer_ledger.py` / `observer_writer.py`, leaving a thin adapter for the daemon's envelope, so there is one implementation, as PD-02 intended. Until then PD-32 keeps the rules aligned.
-Recommendation: APPROVE. Decision: PENDING
+**PD-34. Converge on the Observer's writer.** Replace `ledger.py` with `observer_ledger.py` / `observer_writer.py` from the frozen r4 commit `d2785406`, leaving a thin adapter for the daemon's envelope and origin record, so there is one implementation, as PD-02 intended. r3.2: the trigger has been met (section 4b). What remains is choosing how the two share code, which is a Class C decision about repository layout. Until then PD-32 keeps the rules aligned, by reference to r4 where r4 is more specific.
+Recommendation: APPROVE; decide the sharing mechanism first. Decision: PENDING
 
-**PD-35. One exit-code table across Spark daemons** (EX-01, E.1 D-6).
-Recommendation: APPROVE, with the numbering in EX-01; a KECC-C3 contract change, made once, before any daemon is installed. Decision: PENDING
+**PD-35. Exit reasons for this pattern** (EX-01, WX-10; revised in r3.2 after WBS 3.1 D-6).
+r3.1 recommended one shared table across Spark daemons. WBS 3.1 D-6 has since ruled MODIFY: the Observer keeps its X1 table locally, and a shared taxonomy "requires demonstrated multi-daemon need and a separate cross-cutting decision". That ruling is the Observer's, and this document does not reopen it. The pattern can still avoid the collision on its own side, with no cross-cutting decision. It would adopt 3.1's symbolic-reason form (WX-10) and, where a reason means the same thing as an Observer reason, use the Observer's number: `UNCERTAIN_COMMIT` 70 → **74**, 70 reserved for `INVARIANT_VIOLATION`, `ROOT_REFUSED` and a lost anchor → 78. The pattern owns this table; it is not a shared one.
+Recommendation: MODIFY (was APPROVE of a shared table): align voluntarily as above, as one KECC-C3 contract change made before any daemon is installed. Decision: PENDING
 
 **PD-36. Revise PD-22** (`gc.collect()` per cycle) from APPROVE to DEFER until DGX RSS data shows a benefit (EX-03).
 Recommendation: DEFER. Decision: PENDING
 
-**PD-37. Adopt the WBS 3.1 lifecycle rules** for the daemon runtime: handlers installed first with stops latched; sense, gate, commit; the lock-inheritance structure test (EX-04 to EX-06).
+**PD-37. Adopt the WBS 3.1 lifecycle rules** for the daemon runtime (EX-04 to EX-06, WX-02, WX-04, WX-05): handlers installed before the lock, with stops latched; `SIGHUP` treated like `SIGTERM`; an immediate wake through a wakeup descriptor rather than polling slices; sense, gate, commit; the lock-inheritance structure test. WBS 3.1 is now final, so these are frozen rules, not E.1 proposals.
 Recommendation: APPROVE. Decision: PENDING
 
 **PD-38. A per-cycle sense budget** across all ctx calls (EX-07).
@@ -134,9 +179,18 @@ Recommendation: APPROVE; a KECC-C3 change in form, with no existing daemon affec
 **PD-42. Record the egress preconditions now** for any future un-reserving of `network.mode: named` (Closing Brief §6.3, board R2 and C15).
 Recommendation: APPROVE (record only). Decision: PENDING
 
+**PD-43. Refuse to run as root** (WX-07, WBS 3.1 §11): `geteuid() == 0` exits 78 before the lock is taken.
+Recommendation: APPROVE; a KECC-C1 addition. Decision: PENDING
+
+**PD-44. Lock anchor and anchor continuity** (WX-03, WBS 3.1 D-5 and §4.4): lock the pre-existing output directory instead of a `daemon.lock` file created on demand, and check the path's identity against the locked descriptor once per cycle, exiting 78 on a mismatch.
+Recommendation: APPROVE. Decision: PENDING
+
+**PD-45. Record two deliberate divergences from WBS 3.1** (WX-08 `DAEMON_STOP`; WX-09 sleep-loop pings), each with its reason, so the next review does not find them as defects.
+Recommendation: APPROVE (record only). Decision: PENDING
+
 ## 8. Recommended order
 
 1. Rule on PD-35 (exit codes) and PD-39 (vocabulary) first. Both change the contract's form, and doing them once avoids two contract versions.
-2. PD-32 and PD-37: small, testable, and they close the only reproduced-by-reading durability gaps.
+2. PD-32, PD-37, PD-43 and PD-44: small and testable. They close the durability gaps found by reading and bring the runtime in line with the now-final WBS 3.1 lifecycle.
 3. PD-40 together with the activation register, before the first daemon is installed on the DGX.
 4. PD-34 when WBS 3.0B freezes.

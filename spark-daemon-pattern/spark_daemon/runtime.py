@@ -12,8 +12,8 @@ Order at start (each step must succeed before the next):
  7. install the audit hook, then import daemon.py
  8. recover the ledger: verify, quarantine a torn tail     -> exit 65 if corrupt (nothing changed)
  9. inventory the output directory for foreign files
-10. commit LEDGER_TAIL_QUARANTINED (if any), DAEMON_START (carries landlock: {abi, status,
-    gaps}), and a foreign-files DAEMON_ERROR (if any)
+10. commit DAEMON_START (carries landlock: {abi, status, gaps}), then LEDGER_TAIL_QUARANTINED
+    (if any) and a foreign-files DAEMON_ERROR (if any)
 11. notify READY=1
 Then each cycle: sense -> decide -> commit events -> refresh digest -> gc.collect() ->
 WATCHDOG=1 -> sleep (jittered). On SIGTERM/SIGINT or max cycles: DAEMON_STOP, STOPPING=1,
@@ -220,9 +220,14 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
 
     try:
         writer.open()
-        if quarantine:
-            recent.append(writer.append("LEDGER_TAIL_QUARANTINED", {
-                "file": quarantine.file, "length": quarantine.length, "sha256": quarantine.sha256}))
+        # DAEMON_START is always the first record of a run, and so of the ledger: a torn first-ever
+        # write must not make the quarantine record seq 1 (WBS 3.0 r4's pre-baseline correction;
+        # r3.2, HF-26). With no complete record but a quarantined tail, a previous run did start
+        # and crashed, so it did not end cleanly.
+        if scan.records == 0:
+            ended_cleanly = False if quarantine else None
+        else:
+            ended_cleanly = scan.last_event_type == "DAEMON_STOP"
         recent.append(writer.append("DAEMON_START", {
             "skeleton_version": VERSION,
             "manifest_sha256": m.sha256,
@@ -231,9 +236,12 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
             "interval_ms": int(interval * 1000),
             "jitter_max_ms": int(jitter_bound * 1000),  # ledger values are integers; see canonical.py
             "landlock": landlock_info,
-            "previous_run_ended_cleanly": None if scan.records == 0 else scan.last_event_type == "DAEMON_STOP",
+            "previous_run_ended_cleanly": ended_cleanly,
             "test_overrides": overrides,
         }))
+        if quarantine:
+            recent.append(writer.append("LEDGER_TAIL_QUARANTINED", {
+                "file": quarantine.file, "length": quarantine.length, "sha256": quarantine.sha256}))
         if foreign:
             recent.append(writer.append("DAEMON_ERROR", {
                 "category": "OUTPUT_DIR_FOREIGN_FILES", "count": len(foreign),
