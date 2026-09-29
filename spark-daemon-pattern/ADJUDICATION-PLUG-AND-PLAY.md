@@ -1,7 +1,7 @@
-# Plug-and-play contract stack × daemon pattern — review for adjudication (r3.3)
+# Plug-and-play contract stack × daemon pattern — review for adjudication (r3.4)
 
-- **Status:** DRAFT FOR ADJUDICATION, a companion to `DAEMON-CONTRACT.md` and `ADJUDICATION-SPARK-SOURCES.md`. One small evidence fix is implemented (PX-01). Everything else is a recommendation; PD-46 to PD-52 are PENDING.
-- **Revision:** r3.3, 2026-09-29, by Claude.
+- **Status:** DRAFT FOR ADJUDICATION, a companion to `DAEMON-CONTRACT.md` and `ADJUDICATION-SPARK-SOURCES.md`. One small evidence fix (PX-01) and one structure test (PD-53, section 7) are implemented. Everything else is a recommendation; PD-46 to PD-62 are PENDING.
+- **Revision:** r3.4, 2026-09-29, by Claude. r3.3 reviewed the plug-and-play proposal (sections 1 to 6). r3.4 adds the framework/services boundary (section 7) and the decisions kernel v2 will need to take (section 8).
 - **Source:** a pasted analysis proposing a "Plug-and-Play Contract Stack": an L0 component envelope, L1 plane contracts, L2 capability contracts, L3 optional optimization profiles, L4 policy contracts, and three connection modes (zero-touch, guided, learned adapter). **Caveat:** its author worked from a review summary, not the roadmap documents, and its X1 and Step 9 details are that summary's. This review did not read X1 or Step 9 either. Nothing here should be read as a statement about what X1 says.
 - **Question asked:** what in that analysis is worth applying to the standard daemon pattern?
 - **Short answer:** the daemon pattern is already a working instance of the proposal. It has an L0-style envelope, one L1 plane contract, a machine-executable conformance suite, pinned contract versions and a no-authority candidate path, with evidence for all of them. It also covers a lifecycle shape that neither proposed pilot exercises: a **resident** process rather than an invoked one. The pattern's experience argues for changing the proposed L0 in two places (section 3), and it exposed one evidence gap here, now fixed (PX-01).
@@ -86,3 +86,82 @@ Recommendation: APPROVE (record only). Decision: PENDING
 1. PD-47 and PD-46 go to the X1 design before its L0 freezes. They are cheapest to change there, and they are the only items here that affect more than this pattern.
 2. PD-48 and PD-49 go with the next contract change (PD-35 and PD-39), so the contract moves once.
 3. PD-50 goes in the activation register's design (PD-40).
+
+## 7. Framework / services boundary (r3.4)
+
+**Source:** the owner's question whether to adopt the Asterinas framekernel split. Asterinas confines all `unsafe` Rust to a small framework, and its compiler refuses `unsafe` in the services built on top. Services and framework share one address space, so the boundary is enforced by the language, not by hardware.
+
+**What fits.** The pattern already has this shape at the daemon boundary. `daemon.py` is a service: `sense`, `decide` and `digest` are pure, and `ctx` is the only door to the system. The skeleton is the framework. The purity check does the job of Asterinas's compiler rule, and, as in a framekernel, both run in one process with Landlock as the kernel backstop. The Spark project has also already made this split for its own writer. The r4 closeout describes `observer_ledger.py` as "pure verification/stamping helpers" and `observer_writer.py` as the "filesystem shell", and its semantic audit requires exactly one `ftruncate` site.
+
+**What does not transfer.** Python has no compiler-enforced `unsafe` boundary. Here the boundary is a syntactic check, already residual risk 2 in `HARDENING.md`, with Landlock as the backstop. "Memory-safe services" is also the wrong property to claim: Python is memory-safe except through `ctypes`, which only `landlock.py` uses (plus `probes.py`, which tries it in order to prove it is blocked). The property that means something in Python is **no I/O and no system calls in services**.
+
+**The skeleton today**, by what each module imports and calls:
+
+| Layer | Modules |
+| --- | --- |
+| Services, pure today | `canonical.py` (RFC 8785 JCS, hashing), `render.py` (digest rendering) |
+| Mixed: a pure core plus I/O | `ledger.py` (hash-chain building and verification, alongside append, fsync, truncate and quarantine), `manifest.py` (validation alongside file read and path resolution), `purity.py` (`check_source` alongside `check_file`), `contract.py` (pure, but imports `proc` for constants) |
+| Framework | `runtime.py`, `guard.py`, `landlock.py` (the only `ctypes`), `proc.py`, `notify.py`, `context.py`, `paths.py`, `unitgen.py` |
+| Tools, outside the runtime | `battery.py`, `probes.py`, `cli.py`, `handoff.py`, `scaffold.py` |
+
+**Implemented now (no behaviour change).** `tests/test_layers.py` checks four things:
+- The service modules import no OS-facing module and nothing from the framework.
+- The service modules never call `open()`.
+- `ctypes` appears only in `landlock.py` and `probes.py`.
+- There is exactly one truncate site, in `ledger.py`, as in r4's audit rule.
+
+Each check was confirmed to fail on a planted violation: an `import os` in `render.py`, and a second `ftruncate` in `guard.py`.
+
+**PD-53. Adopt the framework/services boundary as a rule of the pattern.**
+- Name both layers in the contract.
+- Enforce them with `tests/test_layers.py`.
+- Move the mixed modules across as they are touched. `purity.py` and `manifest.py` need small splits.
+- Do not split `ledger.py` by hand. PD-34 replaces it with the Observer's modules, which r4 already split, so doing it now would mean doing it twice.
+- Borrow the shape, not the name: the contract should not claim Asterinas's guarantee.
+
+Recommendation: APPROVE. Decision: PENDING
+
+## 8. Decisions kernel v2 will need
+
+**Source:** the owner's statement that this subsystem "doesn't have a spot in the road map but will have one by kernel v.2". The items below are the ones this pattern cannot settle alone: each touches the Observer, X1, deployment or model-facing delivery. I read the Kernel v0.2 Stage A review, but not a kernel v2 roadmap, so these are questions to put to it, not claims about it.
+
+**Already on the list, and kernel-level in scope:**
+- PD-39: KECC change classes and a support horizon for every published contract.
+- PD-40: the activation register.
+- PD-41: reserved human-correction event names across ledgers.
+- PD-46 and PD-47: L0 in X1, with this pattern as pilot 0.
+- PD-50: no zero-touch activation for resident components.
+
+**PD-54. A roadmap slot and an owner for resident components.** The daemon subsystem has no WBS number. Kernel v2 should give it one, as an observe-only plane below the fixed kernel. The skeleton goes in the fixed tier (it holds durability and confinement); manifests and `daemon.py` files are the pluggable part.
+Recommendation: APPROVE. Decision: PENDING
+
+**PD-55. A shared exit-reason taxonomy across Spark's long-running processes.** WBS 3.1 D-6 left this for "a separate cross-cutting decision" once multi-daemon need is demonstrated. Kernel v2 is where that decision belongs. The evidence it needs is the Observer plus at least one installed daemon. PD-35's voluntary alignment means a shared table would cost this pattern nothing later.
+Recommendation: DEFER to kernel v2; keep PD-35 meanwhile. Decision: PENDING
+
+**PD-56. How the Observer and the daemons share one durable writer.** PD-34 needs a mechanism, and this pattern must not import from `~/spark-governance` without one. The options are a kernel-owned library, or a vendored copy pinned by commit and SHA-256 with a test that it still matches `d2785406`.
+Recommendation: MODIFY. Use the vendored pinned copy now, and let kernel v2 decide whether a kernel-owned library replaces it. Decision: PENDING
+
+**PD-57. One owner for unit generation.** WBS 3.1 §11 gives WBS 4.0 the Observer's unit, `WatchdogSec`, restart policy, dedicated user, sandboxing and startup timeout. This pattern generates its own units with `unitgen.py`, checked by DB-15. Two generators for the same kind of process will drift apart.
+Recommendation: APPROVE one generator for every resident component, chosen at kernel v2. The other becomes the first one's conformance reference (DB-15's syscall check and lint). Decision: PENDING
+
+**PD-58. The off-host anchor.** r4's known limit is that deleting all of `history/` still looks like a first run until an off-host commitment exists. The same is true of a daemon's output directory. Chain heads for every ledger (the Observer's and each daemon's) need one off-host place, one writer and one verification schedule.
+Recommendation: APPROVE as a kernel v2 requirement; PD-40's register records into it. Decision: PENDING
+
+**PD-59. The implementation language of the framework half** (from section 7). Stay with the Python standard library for kernel v2. The only memory-unsafe code is about 250 lines of `ctypes` making three Landlock system calls, covered by DB-17 and DB-18. Record the trigger for revisiting: a second kernel interface that needs `ctypes`, or a measured cost that Python cannot meet.
+Recommendation: APPROVE (stay; record the trigger). Decision: PENDING
+
+**PD-60. Whether any resident component may act or send.** `daemon_class: act` (PD-01) and `network.mode: named` (PD-42) are reserved. Their preconditions are recorded: the H-Track declared safe state, and the egress threat model with an allowlist, rate limit and byte-exact copy. Kernel v2 should say whether either is in scope at all.
+Recommendation: keep both reserved through kernel v2. Lifting either needs its own adjudication against those preconditions. Decision: PENDING
+
+**PD-61. How untrusted evidence reaches a model.** A daemon digest is untrusted text. The WBS 3.0 writers' rule (a user or tool turn, inside delimiters, never a system prompt, with the stamp checked for staleness) and the Closing Brief's single read-only tool (§6.2) should become one kernel rule, owned by the Inference Interface, for every observer's output, not a per-daemon convention.
+Recommendation: APPROVE as a kernel v2 requirement. Decision: PENDING
+
+**PD-62. Producer identity never raises trust.** Whether a candidate came from a person, a script or a model (`producer.kind`) is provenance only. Every candidate faces the same conformance suite and the same Class C activation, including adapters a model writes for itself. This pattern's `AUTHORITY` statement already says so. Kernel v2 should make it an X1 rule, so no future admission path grants trust by origin.
+Recommendation: APPROVE. Decision: PENDING
+
+**Suggested order for kernel v2:**
+1. PD-54, which gives the rest an owner.
+2. PD-57 and PD-58, which are deployment facts before any daemon is installed.
+3. PD-56, before PD-34 is carried out.
+4. PD-61 and PD-62, before any model reads a digest or writes a candidate.
+5. PD-55, PD-59 and PD-60 once their evidence exists.
