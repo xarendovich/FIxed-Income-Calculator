@@ -7,11 +7,15 @@ system config, a private copy of the index for `status` (script-board F4), and
 safe.directory scoped to exactly this repository, since the daemon runs as its own user.
 
 Things any command-driven daemon must handle, shown here:
-- a command can fail or time out: check returncode (None means timed out or truncated) and
-  record the repository as unavailable instead of guessing;
+- a command can fail, time out or overflow its cap: a failing Git is an observation (the
+  repository is unavailable), but a timeout or an overflow is not, so it fails the cycle;
 - output is untrusted text: parse it strictly, cap it, and never copy raw lines into events;
 - one noisy repository must not flood the ledger: ref changes are batched into a single
-  bounded event per cycle.
+  bounded event per cycle;
+- a sample taken while the repository is changing is not an observation: refs and the dirty
+  count are read twice, and if they differ the cycle returns ctx.unsettled("REPO_CHANGING")
+  instead of recording a half-way state. During a long build or rebase the daemon stays
+  patient up to the manifest's blind_limit_seconds, then stops for a human (r3.5).
 """
 
 REPO = "~/repos/watched"
@@ -22,13 +26,46 @@ REF_CHARS = 200
 
 def _git(ctx, args, index_copy=False):
     result = ctx.git(REPO, args, max_bytes=262144, index_copy=index_copy)
+    # Output over the cap, or a timeout, is not an observation of the repository: it is a
+    # failed cycle (a typed DAEMON_ERROR) that counts towards blind_limit_seconds. r3.5: it
+    # used to read as "unavailable" or "dirty: null", accepted every cycle, which hid a
+    # capacity problem from both the ledger and the limit.
+    if result.truncated:
+        raise ctx.TooLarge("git output over the cap")
+    if result.timed_out:
+        raise TimeoutError("git timed out")
     if result.returncode != 0:
         return None
     return result.stdout
 
 
+def _parse_refs(refs_text):
+    refs = {}
+    for line in refs_text.splitlines()[:MAX_REFS]:
+        sha, _, name = line.partition(" ")
+        if len(sha) in (40, 64) and name:
+            refs[name[:REF_CHARS]] = sha
+    return refs
+
+
+def _dirty_count(status):
+    return len([p for p in status.split("\0") if p])
+
+
+def _moving(ctx, snapshot):
+    """Re-read what changes fastest; True if it moved since the first read."""
+    refs_text = _git(ctx, ["for-each-ref", "--format=%(objectname) %(refname)", "refs/heads", "refs/tags"])
+    if refs_text is None or _parse_refs(refs_text) != snapshot["refs"]:
+        return True
+    if snapshot["dirty"] is not None:
+        status = _git(ctx, ["status", "--porcelain=v1", "-z"], index_copy=True)
+        if status is None or _dirty_count(status) != snapshot["dirty"]:
+            return True
+    return False
+
+
 def sense(ctx):
-    """The only function with I/O: three or four read-only Git calls."""
+    """The only function with I/O: read-only Git calls, the fast-changing ones twice."""
     try:
         bare = _git(ctx, ["rev-parse", "--is-bare-repository"])
     except ctx.Missing:
@@ -39,17 +76,15 @@ def sense(ctx):
     head = _git(ctx, ["rev-parse", "--abbrev-ref", "HEAD"])
     if refs_text is None or head is None:
         return {"available": False}
-    refs = {}
-    for line in refs_text.splitlines()[:MAX_REFS]:
-        sha, _, name = line.partition(" ")
-        if len(sha) in (40, 64) and name:
-            refs[name[:REF_CHARS]] = sha
+    refs = _parse_refs(refs_text)
     snapshot = {"available": True, "bare": bare.strip() == "true", "head": head.strip()[:REF_CHARS],
                 "refs": refs, "refs_truncated": len(refs_text.splitlines()) > MAX_REFS, "dirty": None}
     if not snapshot["bare"]:
         status = _git(ctx, ["status", "--porcelain=v1", "-z"], index_copy=True)
         if status is not None:
-            snapshot["dirty"] = len([p for p in status.split("\0") if p])
+            snapshot["dirty"] = _dirty_count(status)
+    if _moving(ctx, snapshot):
+        return ctx.unsettled("REPO_CHANGING")
     return snapshot
 
 

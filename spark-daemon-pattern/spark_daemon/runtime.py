@@ -20,6 +20,16 @@ WATCHDOG=1 -> sleep (jittered). On SIGTERM/SIGINT or max cycles: DAEMON_STOP, ST
 exit 0. Any ledger write or fsync failure: exit 70 at once. Any policy violation: exit 78
 (fail closed).
 
+Blind period (r3.5). A cycle is accepted when sense() returns a snapshot and its events are
+committed. sense() may instead return ctx.unsettled(reason) when what it read was not stable
+(say, a worktree changing under a build): the cycle is abandoned before decide(), with no
+event and no error. Failed cycles are not accepted either. The runtime keeps the monotonic
+time of the last accepted cycle (start-up counts as one); while the gap stays under the
+manifest's blind_limit_seconds it keeps pinging the watchdog, because being patient through
+a long build is correct. Past the limit it records DAEMON_ERROR SENSE_BLIND and exits 78,
+which the unit never restarts: a daemon that has seen nothing for that long needs a human,
+and a watchdog that keeps ticking over an empty ledger would hide it.
+
 Three additions (r2). Landlock (spark_daemon/landlock.py) is a fourth, kernel-enforced
 layer next to purity.py, the audit hook and the systemd unit; see that module's docstring
 for what it does and does not cover, in particular the gap it cannot close on its own (a
@@ -45,10 +55,10 @@ import sys
 import time
 
 from . import (DIGEST_NAME, EXIT_ALREADY_RUNNING, EXIT_LEDGER_CORRUPT, EXIT_OK, EXIT_POLICY,
-               EXIT_UNCERTAIN_COMMIT, EXIT_USAGE, LOCK_NAME, TMP_DIR, TMP_PREFIX, VERSION)
+               EXIT_SENSE_BLIND, EXIT_UNCERTAIN_COMMIT, EXIT_USAGE, LOCK_NAME, TMP_DIR, TMP_PREFIX, VERSION)
 from . import guard, landlock, ledger, manifest as manifest_mod, notify as notify_mod, purity, render
 from .canonical import CanonicalError, sha256_hex, to_json_value
-from .context import Context, utc_now
+from .context import Context, Unsettled, utc_now
 
 EXCEPTION_NAME_MAX = 64
 FOREIGN_NAMES_MAX = 20
@@ -144,12 +154,17 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
         return EXIT_USAGE
 
     interval = float(m.trigger.interval_seconds)
+    blind_limit = float(m.blind_limit_seconds)
     audit_mode = "enforce"
     if test_mode:
         ms = os.environ.get("SPARK_DAEMON_TEST_INTERVAL_MS")
         if ms and ms.isdigit() and 50 <= int(ms) <= 60000:
             interval = int(ms) / 1000
             overrides["interval_ms"] = int(ms)
+        ms = os.environ.get("SPARK_DAEMON_TEST_BLIND_LIMIT_MS")
+        if ms and ms.isdigit() and 100 <= int(ms) <= 3600000:
+            blind_limit = int(ms) / 1000
+            overrides["blind_limit_ms"] = int(ms)
         if os.environ.get("SPARK_DAEMON_AUDIT") == "record":
             audit_mode = "record"
             overrides["audit_mode"] = "record"
@@ -251,6 +266,7 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
         notify_mod.notify(f"STATUS=observing; ledger seq {writer.tail.seq}")
 
         prev, streak, cycles = None, None, 0
+        blind = _Blind(time.monotonic())
         violations_seen = guard.VIOLATIONS["count"]
         while not stop.requested:
             if max_cycles is not None and cycles >= max_cycles:
@@ -258,14 +274,18 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
                 break
             cycles += 1
             stage = "sense"
-            error = None
+            error = unsettled = None
             prepared = snapshot = None
             try:
-                snapshot = to_json_value(module.sense(ctx))
-                stage = "decide"
-                events = module.decide(prev, snapshot)
-                stage = "validate"
-                prepared = writer.prepare(_validate_events(events, m.ledger.event_types))
+                sensed = module.sense(ctx)
+                if isinstance(sensed, Unsettled):
+                    unsettled = sensed.reason        # abandoned before decide(): no event, no error
+                else:
+                    snapshot = to_json_value(sensed)
+                    stage = "decide"
+                    events = module.decide(prev, snapshot)
+                    stage = "validate"
+                    prepared = writer.prepare(_validate_events(events, m.ledger.event_types))
             except guard.PolicyViolation as e:
                 error = ("POLICY_VIOLATION", e)
             except (CanonicalError, ledger.RecordTooLarge, _EventError) as e:
@@ -275,7 +295,7 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
                 # A stop request arrives as a flag (see _Stop), never as an exception.
                 error = (f"{stage.upper()}_FAILED", e)
 
-            if not error:
+            if not error and not unsettled:
                 for record in writer.commit(prepared):
                     recent.append(record)
                 prev = snapshot
@@ -303,6 +323,22 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
                     log("policy violation; stopping (fail closed)")
                     notify_mod.notify("STOPPING=1")
                     return EXIT_POLICY
+
+            now = time.monotonic()
+            if error or unsettled:
+                blind.miss(unsettled or error[0], "unsettled" if unsettled else "error")
+            else:
+                blind.accept(now)
+            if blind.seconds(now) >= blind_limit:
+                recent.append(writer.append("DAEMON_ERROR", {
+                    "category": "SENSE_BLIND", "blind_ms": int(blind.seconds(now) * 1000),
+                    "limit_ms": int(blind_limit * 1000), "unsettled_cycles": blind.unsettled,
+                    "failed_cycles": blind.failed, "last_cause": blind.last_cause,
+                    "last_cause_kind": blind.last_kind}))
+                log(f"no accepted cycle for {int(blind.seconds(now))} s (limit {blind_limit:g} s, "
+                    f"last cause {blind.last_cause}); stopping, needs a human")
+                notify_mod.notify("STOPPING=1")
+                return EXIT_SENSE_BLIND
 
             gc.collect()
             notify_mod.notify("WATCHDOG=1")
@@ -358,6 +394,27 @@ def _validate_events(events, declared):
             raise _EventError("payload must be a mapping")
         out.append((event_type, to_json_value(payload)))
     return out
+
+
+class _Blind:
+    """Time since the last accepted cycle, and what has happened since (r3.5)."""
+
+    def __init__(self, now):
+        self.accept(now)
+
+    def accept(self, now):
+        self.since, self.unsettled, self.failed = now, 0, 0
+        self.last_cause = self.last_kind = None
+
+    def miss(self, cause, kind):
+        if kind == "unsettled":
+            self.unsettled += 1
+        else:
+            self.failed += 1
+        self.last_cause, self.last_kind = cause, kind
+
+    def seconds(self, now):
+        return now - self.since
 
 
 def _cleared(writer, streak, ended_by):

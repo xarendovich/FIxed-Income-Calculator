@@ -23,6 +23,9 @@ COMMAND_RE = re.compile(r"^[a-z][a-z0-9._-]{0,31}$")
 USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 PURPOSE_RE = re.compile(r"^[A-Za-z0-9 .,;:()/'+-]{10,200}$")
 MANIFEST_MAX_BYTES = 65536
+# blind_limit_seconds (r3.5): a minute at least; a day at most, so "infinite patience" cannot
+# be written down; and at least three poll intervals, so one slow cycle is never fatal.
+BLIND_LIMIT_MIN, BLIND_LIMIT_MAX, BLIND_LIMIT_INTERVALS = 60, 86400, 3
 
 # Always denied, for reading and writing, whatever the manifest says (never removable).
 BASE_DENY = (
@@ -92,7 +95,7 @@ def path_refusal(path: str):
 TOP_KEYS = {
     "manifest_schema", "name", "version", "purpose", "daemon_class", "trigger", "reads",
     "commands", "output_dir", "deny", "network", "run_as", "resources", "watchdog_seconds",
-    "step_timeout_seconds", "ledger", "digest",
+    "step_timeout_seconds", "blind_limit_seconds", "ledger", "digest",
 }
 
 
@@ -151,6 +154,7 @@ class Manifest:
     resources: Resources
     watchdog_seconds: int
     step_timeout_seconds: int
+    blind_limit_seconds: int
     ledger: LedgerSpec
     digest: DigestSpec
     sha256: str          # sha256 of the canonical manifest, recorded in DAEMON_START
@@ -229,7 +233,10 @@ def parse(data: dict, path: str = "<memory>") -> Manifest:
     if not c.keys("manifest", data, TOP_KEYS):
         raise ManifestError(c.problems)
 
-    if data.get("manifest_schema") != MANIFEST_SCHEMA:
+    if data.get("manifest_schema") == "spark-daemon-manifest/1":
+        c.fail("manifest_schema", f"is version 1; {MANIFEST_SCHEMA!r} adds the required blind_limit_seconds "
+                                  "(contract 2.0.0): set it and change manifest_schema")
+    elif data.get("manifest_schema") != MANIFEST_SCHEMA:
         c.fail("manifest_schema", f"must be {MANIFEST_SCHEMA!r}")
     name = c.text("name", data.get("name"), NAME_RE,
                   "must be 3-40 characters: lowercase letters, digits and '-', starting with a letter")
@@ -312,6 +319,12 @@ def parse(data: dict, path: str = "<memory>") -> Manifest:
     step_timeout = c.integer("step_timeout_seconds", data.get("step_timeout_seconds"), 1, 600)
     if watchdog and step_timeout and step_timeout * 2 > watchdog:
         c.fail("step_timeout_seconds", "must be at most half of watchdog_seconds")
+    # r3.5: how long the daemon may go without an accepted cycle (unsettled samples or failed
+    # cycles) before it exits SENSE_BLIND. Required and bounded: no default, no infinity.
+    blind_limit = c.integer("blind_limit_seconds", data.get("blind_limit_seconds"),
+                            BLIND_LIMIT_MIN, BLIND_LIMIT_MAX)
+    if blind_limit and trigger and blind_limit < BLIND_LIMIT_INTERVALS * trigger.interval_seconds:
+        c.fail("blind_limit_seconds", f"must be at least {BLIND_LIMIT_INTERVALS} x trigger.interval_seconds")
 
     ledger = None
     lg = data.get("ledger")
@@ -377,7 +390,8 @@ def parse(data: dict, path: str = "<memory>") -> Manifest:
         name=name, version=version, purpose=purpose, daemon_class=daemon_class,
         trigger=trigger, reads=reads, commands=commands, output_dir=output_dir, deny=deny,
         network_mode=network_mode, run_as=run_as, resources=resources,
-        watchdog_seconds=watchdog, step_timeout_seconds=step_timeout, ledger=ledger,
+        watchdog_seconds=watchdog, step_timeout_seconds=step_timeout,
+        blind_limit_seconds=blind_limit, ledger=ledger,
         digest=digest, sha256=digest_sha, path=os.path.abspath(path),
     )
 

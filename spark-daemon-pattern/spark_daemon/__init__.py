@@ -10,7 +10,7 @@ unit generator only prints text for a human to review.
 
 VERSION = "0.3.0"
 
-MANIFEST_SCHEMA = "spark-daemon-manifest/1"
+MANIFEST_SCHEMA = "spark-daemon-manifest/2"
 LEDGER_SCHEMA = "spark-daemon-ledger/1"
 BATTERY_SCHEMA = "spark-daemon-battery/1"
 
@@ -41,3 +41,5 @@ EXIT_LEDGER_CORRUPT = 65      # EX_DATAERR: refuse to start, change nothing
 EXIT_UNCERTAIN_COMMIT = 70    # EX_SOFTWARE: a ledger write or fsync failed; recovery decides on restart
 EXIT_ALREADY_RUNNING = 73     # EX_CANTCREAT: another instance holds the lock
 EXIT_POLICY = 78              # EX_CONFIG: output directory unsafe, or a policy violation (fail closed)
+EXIT_SENSE_BLIND = 78         # EX_CONFIG: no accepted cycle within blind_limit_seconds (SENSE_BLIND);
+                              # like every 78, it needs a human and the unit never restarts it

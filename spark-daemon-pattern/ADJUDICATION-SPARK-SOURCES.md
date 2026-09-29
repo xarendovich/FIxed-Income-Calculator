@@ -1,6 +1,6 @@
 # Daemon pattern × Spark handoffs — cross-check for adjudication (r3.2)
 
-- **Status:** DRAFT FOR ADJUDICATION, a companion to `README.md`, `HARDENING.md` and `DAEMON-CONTRACT.md`. Three items are implemented because each is a reproduced defect: SX-01 (security, r3.1); SX-02 (a duplicate launch deleted the running instance's files) and SX-03 (a torn first write produced a ledger the battery rejects), both r3.2. Everything else is a recommendation, and PD-32 to PD-45 are PENDING.
+- **Status:** DRAFT FOR ADJUDICATION, a companion to `README.md`, `HARDENING.md` and `DAEMON-CONTRACT.md`. Three items are implemented because each is a reproduced defect: SX-01 (security, r3.1); SX-02 (a duplicate launch deleted the running instance's files) and SX-03 (a torn first write produced a ledger the battery rejects), both r3.2. Everything else is a recommendation, and PD-32 to PD-45 are PENDING. r3.5 adds the blind period (section 4c, PD-63), implemented at the owner's request.
 - **Revision:** r3.2, 2026-09-28, by Claude. r3.2 adds the WBS 3.1 final adjudicated contract (section 4a) and the WBS 3.0 r4 closeout (section 4b), revises PD-34, PD-35 and PD-37 to follow them, and adds PD-43 to PD-45.
 - **Question asked:** is there language, contract or architectural design in the other Spark documents, including the completed WBS sections, that the daemon pattern should copy?
 - **Short answer:** yes, and more than borrowing. The daemon pattern's ledger and recovery code were drafted from the WBS 3.0 spec **r2**. Since then r3 was adjudicated (2026-09-26) and 3.0C.1 was frozen (2026-09-27), and both changed rules this pattern cites by ID. The Spark handoffs also closed a Git code-execution path that this pattern had not (SX-01, now fixed), and WBS 3.0E.1 had already reviewed this pattern once (section 4).
@@ -132,6 +132,31 @@ r4 (frozen at `d2785406`, 410 tests) corrects WBS 3.0 recovery for the case befo
 | RX-06 | §5.1: the first-run open path creates neither the ledger nor the digest | The ledger is created by the first append (conforms). The digest is rendered after every cycle | Nothing to change |
 
 **PD-34 has triggered.** The Observer's writer (3.0C.1) and its recovery (r4, R4.2C) are both frozen, and r4 found no need for a separate `observer_recovery.py`. The condition PD-34 waited for ("when WBS 3.0B freezes") has in effect been met. Two things still stand in the way of a drop-in replacement. First, the Observer's writer is shaped around `OBSERVER_BASELINE` and its own event types, so the adapter PD-34 describes has to be written. Second, the Observer is on a different host path (`~/spark-governance`), and this pattern must not import from it until someone decides how the code is shared.
+
+## 4c. Blind period (r3.5, implemented at the owner's request)
+
+**Source:** the owner's analysis of the Observer's blind-period rule. As described there: under D-7 the Observer keeps the monotonic time of its last accepted cycle. Unstable samples, repeated gate rejection, Git-output ceilings and parser entry ceilings leave it "alive but blind". Within `T` it keeps pinging the watchdog; beyond `T` it exits `SENSE_BLIND` (78, no restart). `T` is injected deployment configuration, tuned above the longest legitimate unsettled period on the host. **Caveat:** D-7 itself was not among the documents read for this review. The description above is the owner's summary, and the pattern follows it as described.
+
+**What the pattern now does:**
+- **`ctx.unsettled(reason)`.** `sense()` returns it when what it read was not stable. The cycle is abandoned before `decide()`, with no event, no error and no new digest. This is the Observer's "abandoned before the gate", expressed as a return value, so daemon code cannot swallow it by accident.
+- **Required `blind_limit_seconds`.** Bounded 60 to 86400 and at least 3 poll intervals, with no default, so infinite patience cannot be written down.
+- **Counted towards the limit:** unsettled cycles and failed cycles. Start-up counts as accepted, and the clock is monotonic.
+- **Not counted:**
+  - A commit failure, which already exits 70 at once.
+  - A digest failure: the events were committed, so the cycle was accepted.
+- **At the limit:** `DAEMON_ERROR` with category `SENSE_BLIND`, carrying `blind_ms`, `limit_ms`, `unsettled_cycles`, `failed_cycles`, `last_cause` and `last_cause_kind`. Then exit 78, and no `DAEMON_STOP`, because it is not a clean stop.
+- **Restarts:** the unit never restarts 78 (HF-28; before this, "no restart" was not true for any 78).
+- **`git-watch` as the reference use:**
+  - A repository that moves between two reads is unsettled (`REPO_CHANGING`).
+  - Output over its cap, or a timeout, is a failed cycle rather than a false "unavailable" (HF-29). This is the "Git-output ceiling" cause, which no longer hides from the limit.
+
+**Deliberate choices, for the adjudicator:**
+1. **`T` lives in the manifest, not in a unit override.** The analysis calls `T` deployment configuration. In this pattern the manifest *is* the approved deployment configuration: it is hashed into `DAEMON_START`, and PD-40's register binds activation to that hash. Tuning `T` for the DGX means changing the approved manifest, which is visible. An environment override in the unit would be an unhashed knob on a safety limit.
+2. **`SENSE_BLIND` is a `DAEMON_ERROR` category, not yet a symbolic exit reason.** The exit number matches the Observer's (78, no restart). The symbolic-reason form arrives with PD-35.
+3. **Unsettled cycles leave no record unless the limit trips.** The analysis calls intermediate states "transient state, not events", and the digest's older stamp already shows a consumer that nothing new was accepted. The alternative is one record at the start of each unsettled streak.
+
+**PD-63. Adopt the blind period as specified above** (contract 2.0.0, manifest schema 2). This covers choices 1 and 3, and choice 2 until PD-35 lands.
+Recommendation: APPROVE. The code is in place because the owner asked for it; this records the ruling. Decision: PENDING
 
 ## 5. What the Spark documents confirm the pattern already does well
 

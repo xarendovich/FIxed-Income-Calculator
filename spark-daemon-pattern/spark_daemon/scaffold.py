@@ -87,6 +87,7 @@ def manifest_template(name: str, purpose: str, unit: str) -> dict:
                       "io_class": "idle"},
         "watchdog_seconds": 180,
         "step_timeout_seconds": 10,
+        "blind_limit_seconds": 3600,     # set above the longest legitimate unsettled period
         "ledger": {"record_max_bytes": 8192, "event_types": ["OBSERVATION_BASELINE", "OBSERVATION_CHANGED"]},
         "digest": {"enabled": True, "max_bytes": 8192},
     }

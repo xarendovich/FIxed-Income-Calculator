@@ -7,6 +7,7 @@ holds by construction for code that follows the purity rules.
 
 import datetime
 import os
+import re
 import stat as stat_mod
 from dataclasses import dataclass
 
@@ -61,6 +62,21 @@ def utc_now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
+UNSETTLED_REASON_RE = re.compile(r"[A-Z][A-Z0-9_]{2,39}")
+
+
+class Unsettled:
+    """What sense() returns instead of a snapshot when what it read is not stable yet (for
+    example, a worktree changing between two reads during a build). The cycle is abandoned
+    before decide(): no event, no error, no new digest. It is not an accepted cycle either, so
+    a run of them counts towards blind_limit_seconds (r3.5)."""
+
+    __slots__ = ("reason",)
+
+    def __init__(self, reason: str):
+        self.reason = reason
+
+
 class Context:
     Missing = Missing
     TooLarge = TooLarge
@@ -78,6 +94,13 @@ class Context:
             return self._policy.readable(path, follow=follow)
         except GuardError as e:
             raise NotAllowed(str(e)) from None
+
+    def unsettled(self, reason: str) -> Unsettled:
+        """Return this from sense() to abandon the cycle: nothing read was stable. The reason is
+        an upper-case category (A-Z, 0-9, _; 3-40 characters), never text from what was read."""
+        if not (isinstance(reason, str) and UNSETTLED_REASON_RE.fullmatch(reason)):
+            raise ValueError("unsettled reason must be 3-40 characters of A-Z, 0-9 and _, starting with a letter")
+        return Unsettled(reason)
 
     def read_text(self, path: str, max_bytes: int = 65536) -> str:
         """Read a text file (UTF-8, invalid bytes replaced). Raises TooLarge past max_bytes."""

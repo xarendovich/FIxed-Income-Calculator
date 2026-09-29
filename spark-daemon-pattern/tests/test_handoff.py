@@ -72,7 +72,8 @@ class PublishedContractTests(unittest.TestCase):
     def test_contract_names_every_ctx_method_and_battery_check(self):
         body = contract.describe()["contract"]
         names = {m["name"] for m in body["ctx"]["methods"]}
-        self.assertEqual(names, {"read_text", "list_dir", "stat", "disk_usage", "run", "git", "now_utc"})
+        self.assertEqual(names, {"read_text", "list_dir", "stat", "disk_usage", "run", "git", "now_utc",
+                                 "unsettled"})
         self.assertEqual(len(body["evidence"]["battery"]["checks"]), 18)
         self.assertIn("no authority", body["authority"])
 
@@ -203,7 +204,8 @@ class EnvelopeTests(unittest.TestCase):
         self.assertTrue(any("changed after the envelope was made" in d["message"] for d in r["diagnostics"]))
 
     def test_other_major_version_is_incompatible(self):
-        self.rewrite(lambda e: e["required_contract"].update(contract_version="2.0.0"))
+        other = f"{int(contract.CONTRACT_VERSION.split('.')[0]) + 1}.0.0"
+        self.rewrite(lambda e: e["required_contract"].update(contract_version=other))
         r = self.report()
         self.assertFalse(r["valid"])
         self.assertEqual(r["candidate"]["contract_match"], "incompatible")

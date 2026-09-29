@@ -24,15 +24,15 @@ from . import (BATTERY_SCHEMA, DIGEST_NAME, EXIT_ALREADY_RUNNING, EXIT_LEDGER_CO
                EXIT_POLICY, EXIT_UNCERTAIN_COMMIT, EXIT_USAGE, KNOWN_OUTPUT_ENTRIES, LEDGER_NAME,
                LEDGER_SCHEMA, MANIFEST_SCHEMA, RESERVED_EVENT_TYPES, VERSION)
 from . import manifest as mf
-from . import proc, purity, render
+from . import proc, purity, render, unitgen
 from .canonical import MAX_SAFE_INT, canonical_bytes, sha256_hex
 
 CONTRACT_SCHEMA = "spark-daemon-contract/1"
-CONTRACT_VERSION = "1.0.1"
+CONTRACT_VERSION = "2.0.0"
 CANDIDATE_SCHEMA = "spark-daemon-candidate/1"
 VALIDATE_SCHEMA = "spark-daemon-validate/1"
 PRECHECK_SCHEMA = "spark-daemon-precheck/1"
-MANIFEST_SCHEMA_ID = "urn:spark:schema:spark-daemon-manifest:1"
+MANIFEST_SCHEMA_ID = "urn:spark:schema:spark-daemon-manifest:2"
 
 AUTHORITY = (
     "A candidate carries no authority. Whoever or whatever produced it - a person, a script "
@@ -45,6 +45,7 @@ AUTHORITY = (
 # knows exactly what it is not checking.
 CROSS_FIELD_RULES = (
     "step_timeout_seconds must be at most half of watchdog_seconds",
+    f"blind_limit_seconds must be at least {mf.BLIND_LIMIT_INTERVALS} x trigger.interval_seconds",
     "run_as.user is required for unit 'system', must not be 'root', and is refused for unit 'user'",
     "paths are compared after expanding '~' (SPARK_DAEMON_HOME, else HOME) and resolving symlinks",
     "every read path must lie outside every denied path (base deny plus the manifest's deny)",
@@ -152,6 +153,11 @@ def manifest_json_schema() -> dict:
             "watchdog_seconds": int_range(10, 3600, "systemd WatchdogSec="),
             "step_timeout_seconds": int_range(1, 600, "Timeout for each ctx.run/ctx.git; at most "
                                                       "half of watchdog_seconds."),
+            "blind_limit_seconds": int_range(mf.BLIND_LIMIT_MIN, mf.BLIND_LIMIT_MAX,
+                                             "Longest time without an accepted cycle before the daemon "
+                                             "exits SENSE_BLIND (78, never restarted). Set it above the "
+                                             "longest legitimate unsettled period on the host, plus a margin; "
+                                             f"at least {mf.BLIND_LIMIT_INTERVALS} x trigger.interval_seconds."),
             "ledger": {
                 "type": "object", "additionalProperties": False,
                 "required": ["record_max_bytes", "event_types"],
@@ -239,7 +245,8 @@ def contract_body() -> dict:
             "file": "daemon.py",
             "max_bytes": 262144,
             "required_functions": [{"name": k, "positional_args": v, "signature": s} for k, v, s in (
-                ("sense", 1, "sense(ctx) -> snapshot (plain data: None, bool, int, str, list, dict)"),
+                ("sense", 1, "sense(ctx) -> snapshot (plain data: None, bool, int, str, list, dict), "
+                             "or ctx.unsettled(reason) when what it read was not stable"),
                 ("decide", 2, "decide(prev, snapshot) -> [(event_type, payload_dict), ...]"))],
             "optional_functions": [{"name": "digest", "positional_args": 2,
                                     "signature": "digest(snapshot, recent) -> [(title, [(label, value), ...]), ...]"}],
@@ -265,6 +272,18 @@ def contract_body() -> dict:
             "canonical_form": "RFC 8785 (JCS) for every accepted value; UTF-8; no lone surrogates",
         },
         "ctx": ctx_capabilities(),
+        "cycle": {
+            "accepted": "sense() returned a snapshot, and decide()'s events were validated and committed "
+                        "(zero events is still accepted); start-up counts as accepted",
+            "unsettled": "sense() returned ctx.unsettled(reason): the cycle is abandoned before decide(), "
+                         "with no event, no DAEMON_ERROR and no new digest",
+            "failed": "sense() or decide() raised, or returned invalid data: DAEMON_ERROR (repeats collapsed)",
+            "blind_limit": "no accepted cycle for blind_limit_seconds (monotonic clock), whether from "
+                           "unsettled or failed cycles: DAEMON_ERROR category SENSE_BLIND with blind_ms, "
+                           "limit_ms, unsettled_cycles, failed_cycles, last_cause and last_cause_kind; then exit 78",
+            "watchdog": "pinged from the main loop throughout, including unsettled and failed cycles within "
+                        "the limit; the limit, not the watchdog, catches a daemon that sees nothing",
+        },
         "git": {
             "via": "ctx.git(repo, args, max_bytes=65536, index_copy=False); ctx.run(['git', ...]) is refused",
             "subcommands": sorted(proc.GIT_SUBCOMMANDS),
@@ -298,7 +317,9 @@ def contract_body() -> dict:
             str(EXIT_LEDGER_CORRUPT): "corrupt ledger; nothing changed",
             str(EXIT_UNCERTAIN_COMMIT): "uncertain ledger commit; recovery decides on restart",
             str(EXIT_ALREADY_RUNNING): "another instance holds the lock",
-            str(EXIT_POLICY): "unsafe output directory, Landlock refused, or a policy violation (fail closed)",
+            str(EXIT_POLICY): "unsafe output directory, Landlock refused, a policy violation, or SENSE_BLIND "
+                              "(no accepted cycle within blind_limit_seconds): fail closed, needs a human",
+            "never_restarted": list(unitgen.NO_RESTART_EXIT_CODES),
         },
         "evidence": {
             "validate": {"schema": VALIDATE_SCHEMA, "cost": "milliseconds",

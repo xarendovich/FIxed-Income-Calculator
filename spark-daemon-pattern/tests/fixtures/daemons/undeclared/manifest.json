@@ -1,5 +1,5 @@
 {
-  "manifest_schema": "spark-daemon-manifest/1",
+  "manifest_schema": "spark-daemon-manifest/2",
   "version": "0.1.0",
   "purpose": "Test fixture daemon for the skeleton self-tests.",
   "daemon_class": "observe",
@@ -27,6 +27,7 @@
   },
   "watchdog_seconds": 20,
   "step_timeout_seconds": 5,
+  "blind_limit_seconds": 600,
   "ledger": {
     "record_max_bytes": 8192,
     "event_types": [

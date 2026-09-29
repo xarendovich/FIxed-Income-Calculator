@@ -2,6 +2,7 @@
 
 - **Status:** DRAFT FOR ADJUDICATION. Nothing here is approved, installed or running anywhere. r3 is implemented and self-tested: 170 of 170 tests pass on Python 3.10, 3.11, 3.12 and 3.13, and all four reference daemons pass 18 of 18 battery checks on this workspace's kernel (Landlock ABI 7). That is evidence for the human's Class C ruling, not the ruling itself. Every PD (PD-01 to PD-31) is still PENDING until recorded in the decision log.
 - **r3.1 (2026-09-28):** cross-checked against the Spark handoffs (WBS 3.0 r3, 3.0C.1, 3.0A.2, 3.0E.1, WBS 2.5, Observer v0.2, the script board, H-Track, Kernel v0.2 Stage A). One Git code-execution path closed (HARDENING.md HF-24, contract 1.0.1); conformance gaps against WBS 3.0 r3 and PD-32 to PD-42 in `ADJUDICATION-SPARK-SOURCES.md`.
+- **r3.5 (2026-09-29):** a blind-period limit. A daemon that sees nothing it can accept (unsettled or failed cycles) for `blind_limit_seconds` stops with `SENSE_BLIND` (78) for a human, instead of pinging the watchdog over an empty ledger. The unit no longer restarts fail-closed exits (HF-28). Contract 2.0.0, manifest schema 2.
 - **r3.3 (2026-09-29):** reviewed the proposed plug-and-play contract stack (L0 component envelope and layers) against this pattern (`ADJUDICATION-PLUG-AND-PLAY.md`). The pattern is already a working L0 instance for resident components. The battery report now names the code it tested (HF-27). PD-46 to PD-52.
 - **r3 in one line:** a review that reproduced and fixed 22 defects, including two confinement escapes (`HARDENING.md`), plus a published, versioned daemon contract and a candidate handoff that carries no authority (`DAEMON-CONTRACT.md`).
 - **Revision:** r3, 2026-09-27 (see the revision history; r2 below for context). r2, 2026-09-27, drafted by Claude from Observer v0.3, the WBS 3.0 spec (r2), the Observer Improvement Proposal and the Spark Script Repository board. r2 adjudicates four external proposals (`ADJUDICATION-AP.md`, PD-15 to PD-20) plus two further ones submitted the same day (polling jitter and per-cycle GC forcing, PD-21 to PD-22), and implements the parts with a clear draft verdict: Landlock (AP-01), JCS key ordering (AP-03/J1), the 64 MB memory floor (IF-01/PD-20), polling jitter and GC forcing. The out-of-process supervisor/worker split (AP-04, S1-S7) stays a design only in `ADJUDICATION-AP.md` — none of it is built yet.
@@ -81,7 +82,7 @@ The battery works in a temporary folder with its own HOME, so it never touches y
 
 | Field | Rule | Why |
 | --- | --- | --- |
-| `manifest_schema` | `spark-daemon-manifest/1` | Versioned like every other Spark schema |
+| `manifest_schema` | `spark-daemon-manifest/2` (r3.5; version 1 had no `blind_limit_seconds`) | Versioned like every other Spark schema |
 | `name`, `version`, `purpose` | slug; `x.y.z`; one plain line, no `%` | `%` is a systemd specifier |
 | `daemon_class` | `observe` only; `act` is reserved and refused | Acting daemons need their own pattern and authority gate |
 | `trigger` | `{"kind": "poll", "interval_seconds": 5..86400}`; `inotify-wakeup` reserved | Observer proposal C2 is deferred |
@@ -93,6 +94,7 @@ The battery works in a temporary folder with its own HOME, so it never touches y
 | `run_as` | `{"unit": "system", "user": ...}` (not root) or `{"unit": "user"}` | v0.3 §4 prefers a system unit with a dedicated user on Ubuntu 24.04 |
 | `resources` | `cpu_weight` 1–100, `cpu_budget_bp` (100 = 1%), `memory_max_mb` 64–2048, `tasks_max`, `io_class` | Budget checked by the battery; caps written into the unit |
 | `watchdog_seconds`, `step_timeout_seconds` | 10–3600; step timeout at most half the watchdog | Every command times out before systemd would kill the daemon |
+| `blind_limit_seconds` | 60–86400, at least 3 × the poll interval; required, no default | How long the daemon may go without an accepted cycle before it stops for a human (see *Blind period* below) |
 | `ledger` | `record_max_bytes`; 1–32 declared `event_types`, none of them reserved | Only declared events can be written |
 | `digest` | `enabled`, `max_bytes` | Size-bounded, with an explicit truncation marker |
 
@@ -104,11 +106,11 @@ The manifest's canonical SHA-256 is recorded in every `DAEMON_START`, so each ru
 
 `daemon.py` defines three functions:
 
-- `sense(ctx)`: the only place with I/O, and only through `ctx`. Returns a snapshot of plain data.
+- `sense(ctx)`: the only place with I/O, and only through `ctx`. Returns a snapshot of plain data, or `ctx.unsettled(reason)` when what it read was not stable (see *Blind period*).
 - `decide(prev, snapshot)`: pure. Returns a list of `(event_type, payload)`.
 - `digest(snapshot, recent)` (optional): pure. Returns `[(title, [(label, value), ...]), ...]`; the skeleton renders and contains it.
 
-`ctx` offers `read_text`, `list_dir`, `stat` (does not follow symlinks; returns `mtime_us`), `disk_usage`, `run` (manifest commands only, never `git`), `git` (read-only subcommands only; see below) and `now_utc`. It has no method that writes, deletes, sends or executes anything else, so "observation never authorizes action" (v0.3 §6.2) holds by construction. `spark-daemon describe` lists the exact signatures and result types.
+`ctx` offers `read_text`, `list_dir`, `stat` (does not follow symlinks; returns `mtime_us`), `disk_usage`, `run` (manifest commands only, never `git`), `git` (read-only subcommands only; see below), `now_utc` and `unsettled`. It has no method that writes, deletes, sends or executes anything else, so "observation never authorizes action" (v0.3 §6.2) holds by construction. `spark-daemon describe` lists the exact signatures and result types.
 
 `ctx.git(repo, args)` takes a read-only subcommand first (`log`, `show`, `diff`, `status`, `rev-parse`, `for-each-ref`, ...), so the daemon's arguments can never be Git global options. File-writing, file-reading and program-running options are refused, including Git's abbreviations. Arguments may not name paths outside the repository. `--no-ext-diff --no-textconv` are forced on diff-producing subcommands, and `safe.directory` is set to exactly the declared repository (PD-25).
 
@@ -148,9 +150,20 @@ The code may import only `bisect collections dataclasses enum functools hashlib 
 
 `DAEMON_START`, `DAEMON_STOP` (with CPU and peak memory), `DAEMON_ERROR`, `DAEMON_ERROR_CLEARED`, `LEDGER_TAIL_QUARANTINED`. A manifest may not declare these names. Every run's first record is `DAEMON_START`; a `LEDGER_TAIL_QUARANTINED` from that start's recovery follows it (r3.2, HF-26).
 
+### Blind period (r3.5)
+
+A cycle is **accepted** when `sense()` returns a snapshot and its events are committed. Zero events still counts. Two kinds of cycle are not accepted:
+
+- **Unsettled:** `sense()` returns `ctx.unsettled("REASON")` because what it read was changing, for example a worktree mid-build. The cycle is abandoned before `decide()`: no event, no error, and the digest keeps its older stamp.
+- **Failed:** `sense()` or `decide()` raised, which is recorded as `DAEMON_ERROR` as before.
+
+The runtime keeps the monotonic time of the last accepted cycle, and start-up counts as one. While the gap is under the manifest's `blind_limit_seconds`, the daemon keeps pinging the watchdog and waits: patience through a long build is correct behaviour. Once the gap reaches the limit, it writes `DAEMON_ERROR` with category `SENSE_BLIND`, carrying `blind_ms`, `limit_ms`, `unsettled_cycles`, `failed_cycles`, `last_cause` and `last_cause_kind`. It then exits 78, and the unit never restarts it.
+
+Without the limit, a daemon that fails or waits every cycle keeps the watchdog happy over a ledger that records nothing. The limit is required and bounded (at most a day), so infinite patience cannot be written down. Set it above the longest legitimate unsettled period on the host, such as a long build or a large checkout, plus a margin. `git-watch` shows the idiom: it reads refs and the dirty count twice and reports `REPO_CHANGING` when they differ. Its manifest allows 7200 s.
+
 ### Exit codes
 
-0 stopped cleanly · 2 bad manifest or impure code · 65 corrupt ledger (nothing changed) · 70 uncertain ledger commit · 73 already running · 78 unsafe output directory or policy violation.
+0 stopped cleanly · 2 bad manifest or impure code · 65 corrupt ledger (nothing changed) · 70 uncertain ledger commit · 73 already running · 78 unsafe output directory, policy violation or `SENSE_BLIND`. The unit sets `RestartPreventExitStatus=2 65 73 78`: only 70 (and a crash) is restarted, because the next start's recovery decides from disk (r3.5, HF-28).
 
 ## 3. The batteries
 
@@ -302,6 +315,7 @@ Recommendation: APPROVE. Decision: PENDING
 | r3.2 | 2026-09-28 | Claude | Cross-check against the WBS 3.1 final adjudicated contract (`ADJUDICATION-SPARK-SOURCES.md` section 4a). Fixed HF-25: a rejected duplicate launch deleted the running instance's `tmp/` files, because crash cleanup ran before the lock (WBS 3.1 §4.2). Cross-check against the WBS 3.0 r4 closeout (section 4b). Fixed HF-26: a torn first-ever write made `LEDGER_TAIL_QUARANTINED` seq 1, a ledger DB-04 rejects; `DAEMON_START` is now always first, following r4's order. PD-34's trigger has been met. Revised PD-35 after 3.1 D-6: the Observer keeps its exit table, and the pattern aligns with it voluntarily instead of proposing a shared one. PD-37 updated; PD-43 (root refusal), PD-44 (lock anchor and continuity) and PD-45 (recorded divergences) added. Contract unchanged at 1.0.1. 175 of 175 self-tests (Python 3.12 with `jsonschema`); 4 × 18 of 18 battery checks. |
 | r3.3 | 2026-09-29 | Claude | Reviewed a proposed plug-and-play contract stack (L0 component envelope; L1 to L4 layers; zero-touch, guided and learned-adapter connection) against this pattern (`ADJUDICATION-PLUG-AND-PLAY.md`). The pattern already implements the proposed L0 for resident components. Recommended changes to the proposal: no self-declared authority field, Spark-executed conformance, digest-pinned contract claims, a resident lifecycle shape, and explicitly named digests. Fixed HF-27: the battery report now carries `daemon_code_sha256`, so a verdict is bound to the code it ran. PD-46 to PD-52. Contract unchanged at 1.0.1. |
 | r3.4 | 2026-09-29 | Claude | Framework/services boundary after the Asterinas framekernel split (`ADJUDICATION-PLUG-AND-PLAY.md` §7): the shape is adopted, the guarantee is not claimed. `tests/test_layers.py` locks in the pure service modules (`canonical`, `render`), `ctypes` only in `landlock`/`probes`, and one truncate site; each check fails on a planted violation. PD-53. Kernel v2 agenda (§8): PD-54 to PD-62 (roadmap slot, shared exit taxonomy, shared writer mechanism, one unit generator, off-host anchor, framework language, act/egress, model-facing evidence rule, producer trust). No runtime change. 179 of 179 self-tests. |
+| r3.5 | 2026-09-29 | Claude | Blind period, at the owner's request: `ctx.unsettled(reason)`, a required `blind_limit_seconds` (60–86400, at least 3 poll intervals), and `DAEMON_ERROR SENSE_BLIND` with exit 78 when no cycle is accepted within it. `git-watch` reports `REPO_CHANGING` when refs or the dirty count move between two reads. Fixed HF-28: `Restart=on-failure` restarted every fail-closed 78 every 10 s forever; the unit now sets `RestartPreventExitStatus=2 65 73 78`. Fixed HF-29: `git-watch` recorded Git output over its cap as "unavailable" or `dirty: null`, accepted every cycle; overflow and timeout are now failed cycles that count towards the limit. Contract 2.0.0 (a required manifest field breaks every 1.x manifest); manifest schema `spark-daemon-manifest/2`, with a migration hint for version 1. PD-63. 195 of 195 self-tests; 4 × 18 of 18 battery checks. |
 
 ## Decision log
 

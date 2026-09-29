@@ -1,13 +1,13 @@
 {
   "schema": "spark-daemon-contract/1",
-  "contract_version": "1.0.1",
-  "contract_sha256": "af8f169e290887ee8ffaad013365d5bfde5a39a9b2991bd40f0e142e9584d9d5",
+  "contract_version": "2.0.0",
+  "contract_sha256": "cdf10247c7e4d9e63d071d882cfe978b0107b48932f09bb0586743392c9e62cb",
   "skeleton_version": "0.3.0",
   "contract": {
     "manifest": {
-      "schema_id": "urn:spark:schema:spark-daemon-manifest:1",
-      "manifest_schema": "spark-daemon-manifest/1",
-      "json_schema_sha256": "62c25d9813adc44c7838ea244f081c0eddff0f98f40f37f45465694756ba0474",
+      "schema_id": "urn:spark:schema:spark-daemon-manifest:2",
+      "manifest_schema": "spark-daemon-manifest/2",
+      "json_schema_sha256": "d3d2b478baff34c8c52f49a8034c36af46b3790a28b809d8ebb452d451ab58aa",
       "max_bytes": 65536,
       "base_deny": [
         "~/spark-core/data",
@@ -184,6 +184,7 @@
       },
       "cross_field_rules": [
         "step_timeout_seconds must be at most half of watchdog_seconds",
+        "blind_limit_seconds must be at least 3 x trigger.interval_seconds",
         "run_as.user is required for unit 'system', must not be 'root', and is refused for unit 'user'",
         "paths are compared after expanding '~' (SPARK_DAEMON_HOME, else HOME) and resolving symlinks",
         "every read path must lie outside every denied path (base deny plus the manifest's deny)",
@@ -198,7 +199,7 @@
         {
           "name": "sense",
           "positional_args": 1,
-          "signature": "sense(ctx) -> snapshot (plain data: None, bool, int, str, list, dict)"
+          "signature": "sense(ctx) -> snapshot (plain data: None, bool, int, str, list, dict), or ctx.unsettled(reason) when what it read was not stable"
         },
         {
           "name": "decide",
@@ -466,6 +467,18 @@
           ],
           "returns": "StatInfo",
           "summary": "Kind (\"file\", \"dir\", \"link\" or \"other\"), size and mtime_us; symlinks are not followed."
+        },
+        {
+          "name": "unsettled",
+          "call": "ctx.unsettled(reason)",
+          "params": [
+            {
+              "name": "reason",
+              "type": "str"
+            }
+          ],
+          "returns": "Unsettled",
+          "summary": "Return this from sense() to abandon the cycle: nothing read was stable. The reason is an upper-case category (A-Z, 0-9, _; 3-40 characters), never text from what was read."
         }
       ],
       "results": [
@@ -553,6 +566,13 @@
         }
       ],
       "writes": "none: ctx has no method that writes, deletes, sends or executes anything outside the manifest's commands"
+    },
+    "cycle": {
+      "accepted": "sense() returned a snapshot, and decide()'s events were validated and committed (zero events is still accepted); start-up counts as accepted",
+      "unsettled": "sense() returned ctx.unsettled(reason): the cycle is abandoned before decide(), with no event, no DAEMON_ERROR and no new digest",
+      "failed": "sense() or decide() raised, or returned invalid data: DAEMON_ERROR (repeats collapsed)",
+      "blind_limit": "no accepted cycle for blind_limit_seconds (monotonic clock), whether from unsettled or failed cycles: DAEMON_ERROR category SENSE_BLIND with blind_ms, limit_ms, unsettled_cycles, failed_cycles, last_cause and last_cause_kind; then exit 78",
+      "watchdog": "pinged from the main loop throughout, including unsettled and failed cycles within the limit; the limit, not the watchdog, catches a daemon that sees nothing"
     },
     "git": {
       "via": "ctx.git(repo, args, max_bytes=65536, index_copy=False); ctx.run(['git', ...]) is refused",
@@ -703,7 +723,13 @@
       "65": "corrupt ledger; nothing changed",
       "70": "uncertain ledger commit; recovery decides on restart",
       "73": "another instance holds the lock",
-      "78": "unsafe output directory, Landlock refused, or a policy violation (fail closed)"
+      "78": "unsafe output directory, Landlock refused, a policy violation, or SENSE_BLIND (no accepted cycle within blind_limit_seconds): fail closed, needs a human",
+      "never_restarted": [
+        2,
+        65,
+        73,
+        78
+      ]
     },
     "evidence": {
       "validate": {

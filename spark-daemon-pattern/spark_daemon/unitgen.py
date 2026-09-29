@@ -10,7 +10,7 @@ verify them with `systemd-analyze --user security` before relying on them.
 import os
 import re
 
-from . import VERSION
+from . import EXIT_ALREADY_RUNNING, EXIT_LEDGER_CORRUPT, EXIT_POLICY, EXIT_USAGE, VERSION
 from .paths import expand, home
 
 # The three Landlock syscalls sit in systemd's @sandbox group, which @system-service does
@@ -34,8 +34,18 @@ def _unit_path(label, path) -> str:
         raise UnitError(f"{label} {path!r} contains characters that are unsafe in a systemd unit")
     return path
 
+# r3.5: exits that mean "a human must look" are never restarted: bad manifest or code (2),
+# corrupt ledger (65), already running (73), and every fail-closed 78 (policy, unsafe output
+# directory, Landlock refused, SENSE_BLIND). Before this, Restart=on-failure restarted a 78
+# every RestartSec=10, which never reaches the default start limit (5 starts in 10 s), so
+# "fail closed" was an endless restart loop. 70 (uncertain commit) stays restartable: the
+# next start's recovery decides from disk.
+NO_RESTART_EXIT_CODES = (EXIT_USAGE, EXIT_LEDGER_CORRUPT, EXIT_ALREADY_RUNNING, EXIT_POLICY)
+RESTART_PREVENT = "RestartPreventExitStatus=" + " ".join(str(c) for c in NO_RESTART_EXIT_CODES)
+
 REQUIRED_DIRECTIVES = (
-    "Type=notify", "NotifyAccess=main", "WatchdogSec=", "Restart=on-failure", "UMask=0077",
+    "Type=notify", "NotifyAccess=main", "WatchdogSec=", "Restart=on-failure", RESTART_PREVENT,
+    "UMask=0077",
     "NoNewPrivileges=yes", "ProtectSystem=strict", "ProtectHome=read-only", "ReadWritePaths=",
     "InaccessiblePaths=", "PrivateTmp=yes", "PrivateDevices=yes", "PrivateNetwork=yes",
     "IPAddressDeny=any", "RestrictAddressFamilies=AF_UNIX", "CapabilityBoundingSet=",
@@ -90,6 +100,7 @@ def generate(m, *, root: str, python: str = "/usr/bin/python3") -> str:
         f"TimeoutStartSec={max(60, m.watchdog_seconds)}",
         "TimeoutStopSec=30",
         "Restart=on-failure",
+        RESTART_PREVENT,
         "RestartSec=10",
         "UMask=0077",
         "",

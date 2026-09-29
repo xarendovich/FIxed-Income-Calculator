@@ -1,11 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:spark:schema:spark-daemon-manifest:1",
-  "title": "Spark daemon manifest (spark-daemon-manifest/1)",
+  "$id": "urn:spark:schema:spark-daemon-manifest:2",
+  "title": "Spark daemon manifest (spark-daemon-manifest/2)",
   "description": "Closed schema: unknown keys are refused at every level, every value is bounded, floats are refused. Cross-field rules that JSON Schema cannot express are listed under x-spark-cross-field-rules.",
   "type": "object",
   "additionalProperties": false,
   "required": [
+    "blind_limit_seconds",
     "commands",
     "daemon_class",
     "deny",
@@ -26,7 +27,7 @@
   ],
   "properties": {
     "manifest_schema": {
-      "const": "spark-daemon-manifest/1"
+      "const": "spark-daemon-manifest/2"
     },
     "name": {
       "type": "string",
@@ -352,6 +353,12 @@
       "maximum": 600,
       "description": "Timeout for each ctx.run/ctx.git; at most half of watchdog_seconds."
     },
+    "blind_limit_seconds": {
+      "type": "integer",
+      "minimum": 60,
+      "maximum": 86400,
+      "description": "Longest time without an accepted cycle before the daemon exits SENSE_BLIND (78, never restarted). Set it above the longest legitimate unsettled period on the host, plus a margin; at least 3 x trigger.interval_seconds."
+    },
     "ledger": {
       "type": "object",
       "additionalProperties": false,
@@ -430,6 +437,7 @@
   },
   "x-spark-cross-field-rules": [
     "step_timeout_seconds must be at most half of watchdog_seconds",
+    "blind_limit_seconds must be at least 3 x trigger.interval_seconds",
     "run_as.user is required for unit 'system', must not be 'root', and is refused for unit 'user'",
     "paths are compared after expanding '~' (SPARK_DAEMON_HOME, else HOME) and resolving symlinks",
     "every read path must lie outside every denied path (base deny plus the manifest's deny)",
