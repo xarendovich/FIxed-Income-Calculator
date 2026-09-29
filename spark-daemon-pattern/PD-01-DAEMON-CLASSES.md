@@ -63,6 +63,9 @@ Safety invariants hold in every state. Functional policy, such as what to do whe
 - **S-5. Authentication and handshakes never degrade.** Details in section 6. If authentication cannot complete, or its state is uncertain, nothing is sent. There is no "erratic, so skip authentication" path.
 - **S-6. Proposals are not authority.** An inference engine or rule may propose; only a gate with pre-approved rules, or a human, disposes.
 - **S-7. Another system's safety protocol wins on its side.** We are a compliant participant in its handoff and never override or work around its interlocks. On any deviation we hand back control by its safe-state rules, not ours.
+- **S-8 (proposed in r3.8, PD-65). Never imply more temporal precision than you have.** An observation states the window it covers. A gap longer than the declared cadence is recorded, never folded silently into the next event's timestamp. See `ADJUDICATION-PLUG-AND-PLAY.md` U-4.
+
+*Where these live (proposed in r3.8, PD-64, rule U-1):* the invariants become a base conformance suite that every contract's own suite inherits, so they apply to every plugin in every plane without making the L0 envelope prescribe behaviour.
 
 ## 6. Authentication and handshakes when systems are erratic (families 1b to 3)
 
@@ -167,3 +170,4 @@ Add entries at the end; never rewrite earlier ones.
 | 2026-09-29 | Scripts | Owner | The same invariants apply to scripts (PD-01.8) |
 | 2026-09-29 | Authentication | Owner, Claude | Connecting to systems with their own safety handoffs: authentication and handshakes never degrade (S-5, S-7, section 6) |
 | 2026-09-29 | Prior-art review | Owner, Claude | Robotics, industrial, flight, automotive, operations and AI-agent sources reviewed (`PRIOR-ART-REVIEW.md`); twelve amendments proposed (section 9a); HF-28 description corrected |
+| 2026-09-29 | Universal contract | Owner, Claude | Alignment with the L0 to L4 stack and rules U-1 to U-3; four further considerations (U-4 temporal honesty, adding S-8; U-5 stop and revocation; U-6 cumulative bounds, measured; U-7 assurance of the assurance), PD-64 to PD-68 in `ADJUDICATION-PLUG-AND-PLAY.md` section 9 |

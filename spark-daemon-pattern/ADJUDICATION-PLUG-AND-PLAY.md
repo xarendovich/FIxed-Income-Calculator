@@ -1,7 +1,7 @@
-# Plug-and-play contract stack × daemon pattern — review for adjudication (r3.4)
+# Plug-and-play contract stack × daemon pattern — review for adjudication (r3.8)
 
-- **Status:** DRAFT FOR ADJUDICATION, a companion to `DAEMON-CONTRACT.md` and `ADJUDICATION-SPARK-SOURCES.md`. One small evidence fix (PX-01) and one structure test (PD-53, section 7) are implemented. Everything else is a recommendation; PD-46 to PD-62 are PENDING.
-- **Revision:** r3.4, 2026-09-29, by Claude. r3.3 reviewed the plug-and-play proposal (sections 1 to 6). r3.4 adds the framework/services boundary (section 7) and the decisions kernel v2 will need to take (section 8).
+- **Status:** DRAFT FOR ADJUDICATION, a companion to `DAEMON-CONTRACT.md` and `ADJUDICATION-SPARK-SOURCES.md`. One small evidence fix (PX-01) and one structure test (PD-53, section 7) are implemented. Everything else is a recommendation; PD-46 to PD-68 are PENDING.
+- **Revision:** r3.4, 2026-09-29, by Claude. r3.3 reviewed the plug-and-play proposal (sections 1 to 6). r3.4 adds the framework/services boundary (section 7) and the decisions kernel v2 will need to take (section 8). r3.8 adds the universal contract's alignment with the stack and four further considerations (section 9).
 - **Source:** a pasted analysis proposing a "Plug-and-Play Contract Stack": an L0 component envelope, L1 plane contracts, L2 capability contracts, L3 optional optimization profiles, L4 policy contracts, and three connection modes (zero-touch, guided, learned adapter). **Caveat:** its author worked from a review summary, not the roadmap documents, and its X1 and Step 9 details are that summary's. This review did not read X1 or Step 9 either. Nothing here should be read as a statement about what X1 says.
 - **Question asked:** what in that analysis is worth applying to the standard daemon pattern?
 - **Short answer:** the daemon pattern is already a working instance of the proposal. It has an L0-style envelope, one L1 plane contract, a machine-executable conformance suite, pinned contract versions and a no-authority candidate path, with evidence for all of them. It also covers a lifecycle shape that neither proposed pilot exercises: a **resident** process rather than an invoked one. The pattern's experience argues for changing the proposed L0 in two places (section 3), and it exposed one evidence gap here, now fixed (PX-01).
@@ -165,3 +165,166 @@ Recommendation: APPROVE. Decision: PENDING
 3. PD-56, before PD-34 is carried out.
 4. PD-61 and PD-62, before any model reads a digest or writes a candidate.
 5. PD-55, PD-59 and PD-60 once their evidence exists.
+
+## 9. The universal contract: alignment with the stack and four additions (r3.8)
+
+**Source:** the owner's questions "How are we aligning this with our standard pattern?" (the L0 to L4 stack) and "Have you introduced all these considerations for the universal contract? Are there any others…?"
+
+### 9.1 What is in place, and what is only on paper
+
+The universal contract (an L0 envelope, plus a conformance suite that every plugin runs) does not exist as code. It is X1's to define, and PD-46 and PD-47 recommend this pattern as its pilot.
+
+| State | What |
+| --- | --- |
+| **In code** (daemon contract 2.0.0) | A closed manifest with declared effects and an execution profile; digest-pinned contract claims with four match states; a candidate envelope with no authority; the conformance battery (DB-01 to DB-18) bound to the manifest and code digests; the blind period (`ctx.unsettled`, `blind_limit_seconds`, `SENSE_BLIND`); never-restarted exits; the framework/services test |
+| **Recorded, pending** | P1 to P6 and PD-46 to PD-62 (this document); daemon classes, consequence levels, invariants S-1 to S-7 and the connector gate (`PD-01-DAEMON-CLASSES.md`); amendments A-1 to A-12 (`PRIOR-ART-REVIEW.md`) |
+| **Not written down before this revision** | Where the recent pieces sit in the stack (9.2), three alignment rules (9.3), four further considerations (9.4) |
+
+### 9.2 Where the recent pieces sit
+
+**The dividing line:** what a component claims about itself belongs in its envelope; what Spark decides about it belongs in Spark's own records.
+
+| Layer | Pieces |
+| --- | --- |
+| **L0 envelope** (claimed by the component) | The requested class, as a ceiling (P1); declared outward connections (PD-01 §6); the lifecycle shape, resident or invoked (P4; daemons are resident, scripts are invoked); `blind_limit_seconds`, the resident health bound; the execution profile, from which the unit is generated (A-2's `OnFailure=` notifier belongs here) |
+| **Spark-side records** (decided by Spark) | The granted class; the consequence level, from a recorded risk assessment (A-3); conformance evidence produced by Spark; revocations (U-5) |
+| **L1 planes** | **Telemetry** = the daemon contract: accepted, unsettled and blind cycles, `SENSE_DEGRADED` and `SENSE_BLIND`, and `spark-escalation/1`, shared by daemons and scripts. **Action** = the connector gate and executor, with the black-channel error model (A-1) and logical supervision (A-8). **Inference** = where an Analyst's (2b) requests go |
+| **L2 capabilities** | Deferred (PD-51) |
+| **L3 profiles** | inotify wake-up over polling. Nothing safety-related (U-2) |
+| **L4 policy** | The PD-01 class ladder: Observe may not propose; Advise may propose but not commit; Act may request commits through a gate. Also consequence rules, shelving limits (A-6), alarm rules (A-5), the security level per connection (A-11), and who may stop or revoke (U-5) |
+| **Conformance** | The battery today; a base suite that every contract inherits (U-1); checks per option (degraded and recovered records, `OnFailure=` present, the gate's erratic-behaviour suite); drills (U-7) |
+
+**Provisional tier mapping** for L4's "T0 to T3". It still has to be checked against the script board's own definitions (PD-01 open question 1). The consequence level stays a separate field.
+
+| L4 tier | PD-01 classes |
+| --- | --- |
+| T0 | Observe (1a, 1b) |
+| T1 | Advise (2a, 2b) |
+| T2 | Operator (3a) |
+| T3 | Actuator (3b) |
+
+### 9.3 Three alignment rules
+
+- **U-1. The safety invariants are a base conformance suite, not L0 fields.** The proposal's warning holds: L0 must stay descriptive, or it becomes a universal API. The invariants (S-1 to S-7 in PD-01, plus S-8 proposed in U-4) are prohibitions, not behaviour. They therefore become a suite that every contract's own suite inherits, so every plugin in every plane is tested against them.
+- **U-2. Nothing safety-related lives in L3.** L3 is optional and negotiated by definition. Blindness detection, escalation, stopping and authentication must all work on the baseline binding. A faster path may deliver sooner, but it is never the only path.
+- **U-3. What an escalation means is a contract; how it is delivered is a binding.** This is the transport contract's own principle: "freeze semantics, not transport technology". `spark-escalation/1` is defined once. The ledger record, the systemd status line, the `OnFailure=` hook, the watcher daemon and an off-host heartbeat are bindings, and any of them can be added without changing it.
+
+### 9.4 Four further considerations from this conversation
+
+Each is new (in no earlier document), and each follows from something this conversation built or found.
+
+**U-4. Temporal honesty: an observation states the window it covers.**
+
+*Problem.*
+- Records carry `timestamp_utc`, the moment of commit. Since r3.5, unsettled cycles leave no record unless the blind limit trips (PD-63, choice 3). So a change that happened while git-watch was unsettled through a long build appears, once the repository settles, as an ordinary event stamped up to two hours after it happened, and nothing in the ledger says so.
+- Failed cycles do leave `DAEMON_ERROR` records, and the digest's stamp goes stale. But the event itself claims more precision in time than the daemon had. S-2 forbids recording a guess as an observation; its twin for time is missing.
+- No contract states which clock does what. The runtime uses a monotonic clock for the blind period, and on Linux that clock does not advance while the host is suspended. Wall-clock record stamps can step backwards after a clock correction, and ledger verification checks sequence and hashes, not timestamp order.
+
+*Proposal.*
+- **(a) A new invariant, S-8: never imply more temporal precision than you have.** When the time since the last accepted cycle exceeds a bound (for example, twice the poll interval), the skeleton writes one gap record before that cycle's events. The record carries the gap's length and the counts of unsettled and failed cycles, so consumers read those events as "happened within this window".
+- **(b) Clock rules for every plugin**, following the transport contract (LTC §9):
+  - monotonic time for liveness, timeouts, blind periods and leases;
+  - wall-clock time only for human-readable stamps and credential validity, with a stated skew margin;
+  - order only from sequence numbers and the hash chain;
+  - a declared behaviour across host suspend: either suspended time counts as blind, or the host is declared never to suspend.
+
+*Where.* L0 lifecycle semantics; the base conformance suite; S-8 in PD-01.
+
+*Leaves open.*
+- The gap record's exact form. A new reserved record type is a contract change, best batched with PD-35 and PD-39.
+- Whether suspended time counts toward `T`.
+
+**U-5. Stop and revocation: the inverse of activation.**
+
+*Problem.* Everything so far governs starting safely: validation, the battery, digest-bound activation (PD-40), no zero-touch activation (PD-50), unlocking classes one at a time. Nothing defines how to withdraw a component or a whole class, although industrial safety treats stopping as the most basic safety function (stop categories in IEC 60204-1, emergency stop in ISO 13850). Specifically:
+- A stop today is a manual `systemctl stop` or `systemctl mask`.
+- The ledger records `DAEMON_STOP` with reason `signal SIGTERM` whether an operator stopped the daemon or it was withdrawn for a defect.
+- Nothing stops every component of an affected skeleton or contract version at once.
+- For the Act family, stopping the process would not by itself revoke a credential that is still valid.
+
+*Proposal.* Universal stop semantics: each is a lifecycle verb with a tested meaning.
+
+| Verb | Meaning |
+| --- | --- |
+| **Stop** | Controlled, within a declared drain bound, with a recorded reason |
+| **Abort** | Forced. The component must be crash-consistent, and the next start must record the unclean end. The daemon pattern already meets both (DB-05) |
+| **Revoke** | At the activation register: the digest is marked revoked, the runtime refuses to start, the refusal is never restarted, and the reason is recorded |
+| **Emergency stop** (Act family) | At the gate: every ticket is refused at once; short-lived credentials expire without renewal; actions in flight are reported as unknown, not as cancelled (LTC-13) |
+
+No stop may depend on the cooperation of the component being stopped, which is the same principle as S-5.
+
+*Where.* L0 lifecycle verbs; L4 (who may stop, revoke and emergency-stop); conformance tests: drain within the bound, a forced abort at random points leaves a verifiable chain, and a revoked digest is refused.
+
+*Leaves open.* Where the revocation list lives before the register exists; who may revoke when the owner is unreachable.
+
+**U-6. Cumulative bounds: what grows over a lifetime.**
+
+*Problem.*
+- The contract bounds everything instantaneous: record size, digest size, memory, CPU budget, command output, per-step timeouts, the blind period. It bounds nothing cumulative.
+- The ledger is append-only with no rotation (WBS 3.0 r3 K1 forbids checkpoints). Start-up verifies the whole chain before `READY=1` (r3 VR6), under a fixed `TimeoutStartSec` of `max(60, watchdog_seconds)`.
+- **Measured here** (`evidence/r3.8/ledger_verify_bench.txt`; x86-64, Python 3.11): verification runs at about 20,000 records per second, linear from 20,000 to 200,000 records. git-watch's 120-second start timeout is therefore exceeded at about 2.4 million records (about 1.6 GB).
+
+| Write rate | Time to reach that size |
+| --- | --- |
+| git-watch's worst case (three events every 60-second cycle) | About a year and a half |
+| A 5-second daemon writing once per cycle | About four and a half months |
+| Realistic rates | Years |
+
+- It is not urgent, but it is unbounded, and when it arrives the failure is severe: start timeout, restart, start limit, failed, with no way back without intervention. Every restart after exit 70 also pays the full verification cost.
+- Quarantine fragments accumulate without limit too, and a full disk fails every daemon's ledger (A-12).
+- The same limit applies to the Observer's own ledger, whose start timeout WBS 4.0 owns. The DGX's ARM cores have not been measured.
+
+*Proposal.*
+- Every component declares cumulative bounds in its execution profile: a ceiling on durable growth per day, a retention rule, and a bound on start-up work.
+- A conformance check projects the time to reach each limit from measured growth, as DB-14 projects CPU.
+- For ledgers, the design must keep K1's intent (no second source of truth):
+  - the ledger is split into sealed segments, and each sealed segment's final head is anchored off-host (PD-58);
+  - start-up fully verifies the open segment, and checks each sealed segment's head against its anchor;
+  - full re-verification runs on a schedule (`spark-daemon verify` on a timer).
+
+  Every byte stays verifiable; not every byte is verified at start-up. The credit that `ADJUDICATION-SPARK-SOURCES.md` §5 gives to full verification at every start still stands for integrity; this proposal bounds its cost.
+
+*Where.* L0 execution profile; the base conformance suite; the ledger design, together with PD-34 and PD-58.
+
+*Leaves open.* Segment size and anchoring cadence. Also whether the Observer adopts the same rule, which would reopen WBS 3.0 (its closeout says any reopening must be deliberate).
+
+**U-7. Assurance of the assurance: evidence expires, and independence must be shown.**
+
+*Problem.*
+- Conformance evidence is produced once, before activation, and bound to digests. Nothing re-proves in production that the safety functions still work.
+- The functions that fire only on failure are exactly the ones that decay unnoticed: the blind-limit exit, an `OnFailure=` notifier, Landlock enforcement after a kernel update, the escalation path. IEC 61508 answers this with a proof test at a stated interval. Operations tooling answers it with an alert that always fires, to prove the pipeline works (the Prometheus watchdog).
+- Independence is asserted rather than shown. A staleness watcher built with this same pattern (one way to provide A-2's external check) would share every skeleton defect with the daemons it watches. A bug in ledger verification or in the runtime loop would blind watcher and watched in the same way at the same moment. This is a common-mode failure; IEC 61508 calls the fraction of failures shared this way the β-factor.
+
+*Proposal.*
+- **(a) Conformance evidence carries a validity period**, set by consequence level, and is re-proven by scheduled drills:
+  - a probe daemon run to its blind limit in a sandbox, with the notification checked end to end;
+  - the Landlock probe (DB-17) re-run after every kernel update;
+  - a heartbeat that always fires through the escalation path.
+
+  Expired evidence is itself an alert.
+- **(b) Every monitoring or redundancy claim names what it shares with what it watches:** host, kernel, interpreter, skeleton code, disk, clock, credentials, network. A monitor's most critical check is implemented diversely. A-2's staleness check becomes a small separate program that does not import `spark_daemon`; a ledger's age needs only a file's modification time and one JSON line. Richer checks, such as chain verification, may reuse the skeleton.
+
+*Where.* A validity period on L0's conformance evidence; a drill category in the base suite; L4 intervals per consequence level.
+
+*Leaves open.* The intervals themselves; who is paged when a drill fails and nobody answers (the no-response path noted below).
+
+**Considered and not added.** Two further points came up, and are left as open questions rather than additions:
+- **Interactions between components:** one daemon observing another's output or, once Act classes exist, an action → alert → action oscillation. A per-component contract cannot see these; they belong to the activation register as a cross-manifest check.
+- **A declared no-response path for every escalation.** Everything ends at "a human", and nothing says what happens when that human is unavailable.
+
+### 9.5 Decisions
+
+**PD-64. Adopt the stack alignment:** the placement in 9.2, rules U-1 to U-3, and the provisional T0 to T3 mapping, pending the script board's definitions.
+Recommendation: APPROVE. Decision: PENDING
+
+**PD-65. Temporal honesty (U-4):** invariant S-8, a gap record when the time since the last accepted cycle exceeds a stated bound, and the clock rules.
+Recommendation: APPROVE. Batch the gap record with the next contract change (PD-35, PD-39, PD-49). Decision: PENDING
+
+**PD-66. Stop and revocation (U-5):** stop, abort, revoke and emergency stop as lifecycle verbs with tested meanings; revocation held in the activation register (PD-40).
+Recommendation: APPROVE. Build revocation with the register. Decision: PENDING
+
+**PD-67. Cumulative bounds (U-6):** declared growth, retention and start-up bounds for every component, with a conformance check that projects time to each limit.
+Recommendation: APPROVE the principle. DEFER the ledger segmentation design to PD-34 and PD-58, and raise it with the Observer's WBS 3.0 owners. Decision: PENDING
+
+**PD-68. Assurance of the assurance (U-7):** evidence validity periods, scheduled drills, stated shared dependencies, and a diverse implementation of each monitor's critical check.
+Recommendation: APPROVE. Decision: PENDING
