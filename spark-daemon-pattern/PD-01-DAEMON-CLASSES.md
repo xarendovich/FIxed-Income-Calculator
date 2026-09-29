@@ -139,6 +139,22 @@ Recommendation: APPROVE the invariant; the script board sets the exit code. Deci
 5. **Multi-daemon effects.** When two Operators request conflicting actions, does the executor need an interlock, like railway routes?
 6. **Certification path.** Which standard, and which independent tester, would make `critical` possible at all?
 
+## 9a. Additions proposed by the prior-art review (r3.7)
+
+`PRIOR-ART-REVIEW.md` sets out twelve proposed amendments (A-1 to A-12) with sources. Each is PENDING and, once ruled on, amends the section named in brackets:
+- **A-1:** the IEC 61784-3 black-channel error model for the connector gate [section 6, PD-01.7].
+- **A-2:** an independent monitor for every class: a systemd `OnFailure=` notifier and an external staleness check [S-1, PD-01.3].
+- **A-3:** consequence levels from a recorded risk assessment [PD-01.2, section 4].
+- **A-4:** the NAMUR NE 107 status vocabulary for alerts [PD-01.3].
+- **A-5:** ISA-18.2 alarm rules for Sentinels (defined response, priority, flood limits, shelving) [PD-01.3].
+- **A-6:** shelving as a bounded, recorded maintenance window extending `T` [S-3].
+- **A-7:** internal versus external cause in blind and degraded records (PackML Held and Suspended) [PD-01.3].
+- **A-8:** logical supervision for the Act-family executor (AUTOSAR) [PD-01.5].
+- **A-9:** a per-daemon list of triggering conditions (ISO 21448 SOTIF) [section 4].
+- **A-10:** an instrumented safety case with safety performance indicators (UL 4600) [section 7].
+- **A-11:** IEC 62443 conduits and security levels for declared connections [section 6].
+- **A-12:** freedom from interference, disk in particular, between daemons of different consequence [section 4].
+
 ## 9. Expansion log
 
 Add entries at the end; never rewrite earlier ones.
@@ -150,3 +166,4 @@ Add entries at the end; never rewrite earlier ones.
 | 2026-09-29 | Escalation | Owner, Claude | Blind daemons let the orchestrator know, so inference can propose a fix; proposals are never authority, and escalation never extends `T` |
 | 2026-09-29 | Scripts | Owner | The same invariants apply to scripts (PD-01.8) |
 | 2026-09-29 | Authentication | Owner, Claude | Connecting to systems with their own safety handoffs: authentication and handshakes never degrade (S-5, S-7, section 6) |
+| 2026-09-29 | Prior-art review | Owner, Claude | Robotics, industrial, flight, automotive, operations and AI-agent sources reviewed (`PRIOR-ART-REVIEW.md`); twelve amendments proposed (section 9a); HF-28 description corrected |

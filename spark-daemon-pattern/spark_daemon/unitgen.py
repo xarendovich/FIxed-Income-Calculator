@@ -36,10 +36,12 @@ def _unit_path(label, path) -> str:
 
 # r3.5: exits that mean "a human must look" are never restarted: bad manifest or code (2),
 # corrupt ledger (65), already running (73), and every fail-closed 78 (policy, unsafe output
-# directory, Landlock refused, SENSE_BLIND). Before this, Restart=on-failure restarted a 78
-# every RestartSec=10, which never reaches the default start limit (5 starts in 10 s), so
-# "fail closed" was an endless restart loop. 70 (uncertain commit) stays restartable: the
-# next start's recovery decides from disk.
+# directory, Landlock refused, SENSE_BLIND). Before this, Restart=on-failure restarted every
+# 78. The start limit below stopped fast exits after five restarts, but SENSE_BLIND comes only
+# after blind_limit_seconds, so for any realistic limit its restarts are too far apart for five
+# to fit in the 300 s window: a blind daemon would have restarted forever (HF-28). 70 (uncertain commit)
+# stays restartable; the start limit bounds a persistent fault, and the next start's
+# recovery decides from disk.
 NO_RESTART_EXIT_CODES = (EXIT_USAGE, EXIT_LEDGER_CORRUPT, EXIT_ALREADY_RUNNING, EXIT_POLICY)
 RESTART_PREVENT = "RestartPreventExitStatus=" + " ".join(str(c) for c in NO_RESTART_EXIT_CODES)
 
