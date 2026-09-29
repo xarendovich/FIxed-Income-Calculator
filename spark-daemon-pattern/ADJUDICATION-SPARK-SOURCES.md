@@ -1,6 +1,6 @@
 # Daemon pattern × Spark handoffs — cross-check for adjudication (r3.2)
 
-- **Status:** DRAFT FOR ADJUDICATION, a companion to `README.md`, `HARDENING.md` and `DAEMON-CONTRACT.md`. Three items are implemented because each is a reproduced defect: SX-01 (security, r3.1); SX-02 (a duplicate launch deleted the running instance's files) and SX-03 (a torn first write produced a ledger the battery rejects), both r3.2. Everything else is a recommendation, and PD-32 to PD-45 are PENDING. r3.5 adds the blind period (section 4c, PD-63), implemented at the owner's request.
+- **Status:** DRAFT FOR ADJUDICATION, a companion to `README.md`, `HARDENING.md` and `DAEMON-CONTRACT.md`. Three items are implemented because each is a reproduced defect: SX-01 (security, r3.1); SX-02 (a duplicate launch deleted the running instance's files) and SX-03 (a torn first write produced a ledger the battery rejects), both r3.2. Everything else is a recommendation, and PD-32 to PD-45 are PENDING. r3.5 adds the blind period (section 4c). It was implemented at the owner's direction, and PD-63 is closed by that directive.
 - **Revision:** r3.2, 2026-09-28, by Claude. r3.2 adds the WBS 3.1 final adjudicated contract (section 4a) and the WBS 3.0 r4 closeout (section 4b), revises PD-34, PD-35 and PD-37 to follow them, and adds PD-43 to PD-45.
 - **Question asked:** is there language, contract or architectural design in the other Spark documents, including the completed WBS sections, that the daemon pattern should copy?
 - **Short answer:** yes, and more than borrowing. The daemon pattern's ledger and recovery code were drafted from the WBS 3.0 spec **r2**. Since then r3 was adjudicated (2026-09-26) and 3.0C.1 was frozen (2026-09-27), and both changed rules this pattern cites by ID. The Spark handoffs also closed a Git code-execution path that this pattern had not (SX-01, now fixed), and WBS 3.0E.1 had already reviewed this pattern once (section 4).
@@ -155,8 +155,11 @@ r4 (frozen at `d2785406`, 410 tests) corrects WBS 3.0 recovery for the case befo
 2. **`SENSE_BLIND` is a `DAEMON_ERROR` category, not yet a symbolic exit reason.** The exit number matches the Observer's (78, no restart). The symbolic-reason form arrives with PD-35.
 3. **Unsettled cycles leave no record unless the limit trips.** The analysis calls intermediate states "transient state, not events", and the digest's older stamp already shows a consumer that nothing new was accepted. The alternative is one record at the start of each unsettled streak.
 
-**PD-63. Adopt the blind period as specified above** (contract 2.0.0, manifest schema 2). This covers choices 1 and 3, and choice 2 until PD-35 lands.
-Recommendation: APPROVE. The code is in place because the owner asked for it; this records the ruling. Decision: PENDING
+**PD-63. Adopt the blind period as specified above** (contract 2.0.0, manifest schema 2).
+Decision: CLOSED BY OWNER DIRECTIVE, 2026-09-29 (decision log). The owner asked for the blind period as "an ability within the daemon pattern" and asked that it not remain a pending decision. It is in force as implemented.
+- Choice 2 follows from PD-35, which is still pending.
+- Choice 3 follows from the owner's own text ("transient state, not events").
+- Choice 1 (`T` in the manifest rather than injected at deployment) was the implementer's reading. It stands unless the owner changes it. The alternative (an install-time `T` recorded in `DAEMON_START`) is a small change if ever wanted.
 
 ## 5. What the Spark documents confirm the pattern already does well
 
