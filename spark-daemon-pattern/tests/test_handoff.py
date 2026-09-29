@@ -2,6 +2,7 @@
 validate --json, precheck, scaffold and the reference daemons."""
 
 import copy
+import hashlib
 import json
 import os
 import shutil
@@ -378,9 +379,18 @@ class BatteryCatchesAlwaysFailingDaemonsTests(unittest.TestCase):
     def test_a_daemon_that_errors_every_cycle_fails_db04(self):
         # r2 passed the raiser fixture: its sense() fails every cycle in the battery's
         # workspace (no ~/data/mode.txt), yet the process exits 0 with a valid chain.
-        p = cli("battery", "--quick", "--manifest", os.path.join(FIXTURES, "raiser", "manifest.json"), timeout=300)
-        self.assertRegex(p.stdout, r"DB-04\s+FAIL\s.*DAEMON_ERROR")
-        self.assertTrue(p.stdout.strip().endswith("RESULT: FAIL"))
+        work = tempfile.mkdtemp(prefix="battery-report-")
+        try:
+            p = cli("battery", "--quick", "--manifest", os.path.join(FIXTURES, "raiser", "manifest.json"),
+                    "--workdir", work, timeout=300)
+            self.assertRegex(p.stdout, r"DB-04\s+FAIL\s.*DAEMON_ERROR")
+            self.assertTrue(p.stdout.strip().endswith("RESULT: FAIL"))
+            # r3.3: the report names the code it ran, not only the manifest, even with no envelope.
+            report = load_json(os.path.join(work, "battery-report.json"))
+            with open(os.path.join(FIXTURES, "raiser", "daemon.py"), "rb") as fh:
+                self.assertEqual(report["daemon_code_sha256"], hashlib.sha256(fh.read()).hexdigest())
+        finally:
+            shutil.rmtree(work)
 
 
 if __name__ == "__main__":

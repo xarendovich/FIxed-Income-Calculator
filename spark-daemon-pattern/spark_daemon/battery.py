@@ -732,11 +732,15 @@ def main(manifest_path: str, *, seed: int, quick: bool, workdir: str | None, thr
         candidate = {"summary": summary, "diagnostics": diags}
         if any(d["severity"] == "error" for d in diags) and result == "PASS":
             result = "INCOMPLETE"
+    # r3.3: the bytes the checks ran, so a verdict is bound to the code as well as the manifest
+    # even without an envelope (the digest an activation register must match, PD-40).
+    with open(os.path.join(ws.daemon_dir, "daemon.py"), "rb") as fh:
+        code_sha = sha256_hex(fh.read())
     report = {
         "schema": BATTERY_SCHEMA, "skeleton_version": VERSION, **contract.contract_identity(),
         "candidate": candidate, "result": result, "seed": seed,
         "quick": quick, "daemon": m.name if m else None, "manifest_sha256": m.sha256 if m else None,
-        "workspace": ws.root, "rewrites": ws.rewrites,
+        "daemon_code_sha256": code_sha, "workspace": ws.root, "rewrites": ws.rewrites,
         "environment": {"python": sys.version.split()[0], "kernel": os.uname().release,
                         "machine": os.uname().machine, "strace": bool(_strace()),
                         "systemd_analyze": bool(shutil.which("systemd-analyze", path="/usr/bin:/bin"))},
