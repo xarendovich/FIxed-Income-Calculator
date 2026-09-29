@@ -1,0 +1,20 @@
+{
+  "manifest_schema": "spark-daemon-manifest/2",
+  "name": "disk-watch",
+  "version": "0.1.0",
+  "purpose": "Records when free space on the model-weights filesystem moves between headroom bands.",
+  "daemon_class": "observe",
+  "trigger": {"kind": "poll", "interval_seconds": 300},
+  "reads": ["~/models"],
+  "commands": [],
+  "output_dir": "~/spark-daemons/disk-watch",
+  "deny": [],
+  "network": {"mode": "none"},
+  "run_as": {"unit": "system", "user": "spark-diskwatch"},
+  "resources": {"cpu_weight": 10, "cpu_budget_bp": 100, "memory_max_mb": 64, "tasks_max": 8, "io_class": "idle"},
+  "watchdog_seconds": 120,
+  "step_timeout_seconds": 10,
+  "blind_limit_seconds": 3600,
+  "ledger": {"record_max_bytes": 8192, "event_types": ["DISK_OBSERVATION_BASELINE", "DISK_BAND_CHANGED", "DISK_PATH_AVAILABILITY_CHANGED"]},
+  "digest": {"enabled": true, "max_bytes": 8192}
+}

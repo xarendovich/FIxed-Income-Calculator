@@ -1,0 +1,36 @@
+name: spark-daemon-pattern
+
+on:
+  push:
+    paths: ["spark-daemon-pattern/**", ".github/workflows/spark-daemon-pattern.yml"]
+  pull_request:
+    paths: ["spark-daemon-pattern/**", ".github/workflows/spark-daemon-pattern.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12"]
+    defaults:
+      run:
+        working-directory: spark-daemon-pattern
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Tools the battery uses for fault injection and unit scoring
+        run: sudo apt-get update -q && sudo apt-get install -y -q strace
+      - name: Optional test dependency (schema agreement)
+        run: python -m pip install --quiet jsonschema
+      - name: Contract is up to date
+        run: make check-contract PY=python
+      - name: Self-tests
+        run: make test PY=python
+      - name: Reference daemons pass the battery
+        run: make battery-examples PY=python

@@ -1,0 +1,131 @@
+{
+  "schema": "spark-daemon-battery/1",
+  "skeleton_version": "0.3.0",
+  "contract_version": "1.0.0",
+  "contract_sha256": "ef03a744961cfad81abced56b0c12b18b222ce3219d779e5f6f79a64319fb585",
+  "candidate": null,
+  "result": "PASS",
+  "seed": 20260927,
+  "quick": false,
+  "daemon": "disk-watch",
+  "manifest_sha256": "4c143741b90911b66f345d50d12c0a72470c122b8d6114e71909311ea5d459b2",
+  "workspace": "/home/user/FIxed-Income-Calculator/spark-daemon-pattern/battery-runs/disk-watch",
+  "rewrites": [],
+  "environment": {
+    "python": "3.12.3",
+    "kernel": "6.18.44-fc-v37",
+    "machine": "x86_64",
+    "strace": true,
+    "systemd_analyze": true
+  },
+  "checks": [
+    {
+      "id": "DB-01",
+      "title": "manifest validates",
+      "state": "PASS",
+      "evidence": "manifest sha256 4c143741b90911b6"
+    },
+    {
+      "id": "DB-02",
+      "title": "purity check",
+      "state": "PASS",
+      "evidence": "no findings"
+    },
+    {
+      "id": "DB-03",
+      "title": "confinement",
+      "state": "PASS",
+      "evidence": "5 cycles; 0 audit events; no file outside the output directory changed"
+    },
+    {
+      "id": "DB-04",
+      "title": "ledger integrity and provenance",
+      "state": "PASS",
+      "evidence": "3 records; chain head e99dca047d72a988; provenance matches"
+    },
+    {
+      "id": "DB-05",
+      "title": "crash and restart",
+      "state": "PASS",
+      "evidence": "8 kills at [0.82, 0.464, 0.893, 0.111, 0.471, 0.87, 0.629, 0.314] s; 9 starts recorded, all after the first flagged unclean; 0 torn tail(s) quarantined; chain verifies"
+    },
+    {
+      "id": "DB-06",
+      "title": "torn-tail quarantine",
+      "state": "PASS",
+      "evidence": "both torn tails quarantined byte-for-byte, recorded, chain verifies"
+    },
+    {
+      "id": "DB-07",
+      "title": "refuses a corrupt ledger",
+      "state": "PASS",
+      "evidence": "flipped one byte in record 15: refused with exit 65, nothing changed"
+    },
+    {
+      "id": "DB-08",
+      "title": "fsync failure",
+      "state": "PASS",
+      "evidence": "exit 70 under injected fsync EIO; restart recovered; chain verifies (+4 records)"
+    },
+    {
+      "id": "DB-09",
+      "title": "disk-full failure",
+      "state": "PASS",
+      "evidence": "exit 70 under injected write ENOSPC; restart recovered; chain verifies (+3 records)"
+    },
+    {
+      "id": "DB-10",
+      "title": "digest containment",
+      "state": "PASS",
+      "evidence": "220 hostile renderings of this daemon's digest, seed 20260927; structure unchanged"
+    },
+    {
+      "id": "DB-11",
+      "title": "notify protocol",
+      "state": "PASS",
+      "evidence": "READY after DAEMON_START; 12 pings, longest gap 0.20 s; STOPPING at exit"
+    },
+    {
+      "id": "DB-12",
+      "title": "single instance and SIGTERM",
+      "state": "PASS",
+      "evidence": "second instance refused (73); SIGTERM gave DAEMON_STOP and exit 0"
+    },
+    {
+      "id": "DB-13",
+      "title": "audit hook blocks forbidden operations",
+      "state": "PASS",
+      "evidence": "10 forbidden operations blocked and counted; output-dir write allowed"
+    },
+    {
+      "id": "DB-14",
+      "title": "resource budget",
+      "state": "PASS",
+      "evidence": "4.08 ms CPU per cycle over 21 cycles, projected 0.001% at a 300 s interval (budget 1.00%); peak RSS 20.5 MiB (limit 64); whole process incl. start-up 215 ms CPU"
+    },
+    {
+      "id": "DB-15",
+      "title": "unit hardening",
+      "state": "PASS",
+      "evidence": "all required directives present; systemd-analyze offline exposure 0.4 (threshold 2.0); start-up syscalls permitted by the unit's seccomp filter"
+    },
+    {
+      "id": "DB-16",
+      "title": "read-only verification",
+      "state": "PASS",
+      "evidence": "two read-only verifications agree (seq 43, chain head 93428f86fc540b79); bytes and mtime unchanged"
+    },
+    {
+      "id": "DB-17",
+      "title": "Landlock blocks with the audit hook record-only",
+      "state": "PASS",
+      "evidence": "ABI 7: with the audit hook in record-only mode, the kernel alone still blocked the forbidden write and the denied read; TCP connect also blocked (EACCES)"
+    },
+    {
+      "id": "DB-18",
+      "title": "DAEMON_START.landlock matches host and manifest",
+      "state": "PASS",
+      "evidence": "DAEMON_START.landlock: ABI 7, status enforced, 0 gap(s); matches this host's ABI and the manifest's own gaps"
+    }
+  ]
+}

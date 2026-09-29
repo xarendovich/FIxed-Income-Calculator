@@ -1,0 +1,152 @@
+# PD-01 (reopened): daemon classes, consequence levels and cross-class safety invariants
+
+- **Status:** OPEN FOR EXPANSION. Reopened by the owner on 2026-09-29. Nothing in this document is decided; every sub-item is PENDING. New classes, invariants and questions are added below as numbered entries and listed in the expansion log (section 9), and nothing already recorded is rewritten.
+- **Supersedes:** the original PD-01 text, "Observe-only in v1. `daemon_class: act` is reserved and refused." That text came with the pattern as received. It was inherited from the Repository Observer (v0.3 §6.2, "observation never authorizes action") and was never ruled on.
+- **Code today:** unchanged. The manifest accepts only `daemon_class: observe`, which corresponds to class 1a below. Nothing here unlocks another class until its own sub-decision is recorded.
+- **Revision:** r3.6, 2026-09-29, by Claude, from the owner's discussion of the taxonomy, consequence of failure, escalation and authentication under erratic conditions.
+
+## 1. Why reopen it
+
+"Observe-only" was a starting scope, not a law of daemons. It was chosen because an observer is the lowest-risk class on which to prove the skeleton: its worst case is a wrong or missing record. Several recent decisions quietly depend on it:
+- stop at `T` (PD-63);
+- no push channel;
+- never restart a fail-closed exit (HF-28).
+
+Those decisions are right for observers and may be wrong for other classes. This document names the classes, so each decision can say which class it holds for.
+
+## 2. The classifier: two independent axes
+
+1. **Capability:** what the daemon may cause. This is the ladder in section 3.
+2. **Consequence:** how bad its failure would be. This is the label in section 4.
+
+They are independent on purpose. A heart monitor only observes, but its failure can hurt someone. "It only observes" must never be read as "it is harmless".
+
+## 3. Axis 1: capability classes (three families, two levels each)
+
+Each step up adds exactly one capability and one new control. **The daemon itself never gains power.** Higher classes get request channels to something separate that holds the authority. So "observation never authorizes action" stays true at every level: a daemon asks, and a gate decides.
+
+| Class | Name | May do | Never does | New control it needs |
+| --- | --- | --- | --- | --- |
+| **1a** | Recorder | Observe; write its own ledger and digest | Signal, propose or change anything | None beyond today's pattern (built and tested) |
+| **1b** | Sentinel | 1a, plus raise a declared, typed, bounded alert that an orchestrator reads (pull) | Push over a network; extend its own `T` | A typed alert format; rate limits; alerts never pause the blind clock |
+| **2a** | Advisor | Turn observations into a proposal with deterministic rules | Carry out the proposal | Proposal envelope with no authority; validation before a human sees it |
+| **2b** | Analyst | 2a, plus ask an inference engine for a diagnosis or proposal | Carry out the proposal; feed raw observed text to a model without containment | PD-61 (untrusted evidence reaches a model only in delimiters, never as instructions); PD-62 (origin never raises trust); proposals validated like any candidate |
+| **3a** | Operator | Request pre-approved, **reversible** actions inside Spark's own domain, through an executor | Hold credentials; act directly; run anything off the runbook | A digest-bound runbook; one H-Track-style ticket per action; the connector gate (section 6); an action ledger; the activation register (PD-40) |
+| **3b** | Actuator | Request **consequential** actions (irreversible, external or physical) through an executor | Anything in 3a's "never" column | Everything for 3a, plus a declared safe state, an independent monitor, redundancy, and the relevant standards (for example IEC 61508 or IEC 62304) with independent testing |
+
+**Where a level ends:** the line between neighbouring levels is what the daemon can cause. Anything that changes state outside the daemon's own output directory belongs to family 3, even "restart my own unit". Between 3a and 3b, the line is reversibility and reach: something undone in minutes and confined to Spark is 3a; everything else is 3b.
+
+**Pros and cons, in brief:**
+
+| Family | For | Against |
+| --- | --- | --- |
+| Observe | Worst case is a wrong or missing record; built today | Cannot help; relies on someone noticing (1b addresses this) |
+| Advise | Faster diagnosis; where inference adds value; still changes nothing | Wrong or manipulated proposals; alert fatigue; 2b is not repeatable |
+| Act | Closes the loop without waiting for a human | Real harm; a bad fix can spread; hardest to test; accountability |
+
+## 4. Axis 2: consequence levels (a label on every daemon)
+
+| Level | A failure costs | What changes for the daemon |
+| --- | --- | --- |
+| **Standard** | A missing or wrong record | Stop at `T` and wait for a human (today's rule) |
+| **Elevated** | Time or money | Escalate early (1b behaviour at half of `T`, whatever the class); a human is paged, not merely informed |
+| **Critical** | Possible harm to a person | A declared safe state instead of "stop"; independent monitor; redundancy. Refused by this pattern until a certification path exists |
+
+## 5. Cross-class safety invariants (never flex, whatever the class or consequence)
+
+Safety invariants hold in every state. Functional policy, such as what to do when blind or how patient to be, varies by class and is decided per class. When a system turns erratic, it may lose functionality; it never loses these.
+
+- **S-1. Never report health you do not have.** The watchdog saying "alive" is never evidence of seeing.
+- **S-2. Never record a guess as an observation.** Unsettled or failed cycles are not observations (PD-63), and a capacity limit is not "unavailable" (HF-29).
+- **S-3. Always surface blindness within `T`.** No class, escalation or pending diagnosis pauses the blind clock. Only a human, or a rule the human approved in advance, extends `T`, and the extension is recorded.
+- **S-4. Stay confined.** The purity check, the audit hook, Landlock and the systemd sandbox apply to every class. Higher classes gain request channels, never wider confinement.
+- **S-5. Authentication and handshakes never degrade.** Details in section 6. If authentication cannot complete, or its state is uncertain, nothing is sent. There is no "erratic, so skip authentication" path.
+- **S-6. Proposals are not authority.** An inference engine or rule may propose; only a gate with pre-approved rules, or a human, disposes.
+- **S-7. Another system's safety protocol wins on its side.** We are a compliant participant in its handoff and never override or work around its interlocks. On any deviation we hand back control by its safe-state rules, not ours.
+
+## 6. Authentication and handshakes when systems are erratic (families 1b to 3)
+
+The design principle is that **the erratic part never holds the keys and never runs the handshake.**
+
+- **A connector gate.** The daemon never holds credentials. A small, separately tested connector gate holds them, runs the other system's protocol exactly, and refuses anything it cannot complete. This follows the simplex architecture (a complex part that may fail, plus a small verified part with the last word), the H-Track ticket, and the transport contract's split: the consumer submits, X1 authorizes, the provider carries it out.
+- **Pull, not push, for 1b and family 2.** Alerts and proposals are published for the orchestrator to read, so those classes need no credentials at all.
+- **Declared connections for family 3.** Every outward connection is declared in the manifest:
+  - a name;
+  - the protocol and its version;
+  - a credential reference (never the secret);
+  - the conformance suite the gate passed for that protocol.
+
+  This is where the reserved `network.mode: named` (PD-42) attaches.
+- **Defences against erratic behaviour**, borrowed from the transport contract (LTC):
+
+| Erratic behaviour | Defence |
+| --- | --- |
+| A restarted or late process continues an old session | Fencing: a session belongs to one process incarnation (LTC-10); after any restart, handshake again, never resume |
+| A timeout mid-handshake | The timeout ends the session and never counts as authorization (LTC-11) |
+| Retries send a command twice | Idempotency keys and one-time nonces |
+| A late or replayed message | Sequence numbers; short-lived tokens bound to one operation (a digest-bound ticket) |
+| Outcome unknown after a crash | Report it as unknown and reconcile; never assume success (LTC `UNKNOWN_AFTER_RESTART`) |
+| A request flood | Rate limits and bounded backpressure at the gate (LTC-07) |
+| Credentials leaking through a crash dump | Credentials live only in the gate's memory with short lifetimes; core dumps disabled in the unit |
+
+- **Proven under erratic conditions.** A connector passes only if every case of this suite fails closed and is recorded truthfully:
+  - kill it mid-handshake;
+  - replay old tokens;
+  - duplicate and reorder messages;
+  - skew the clock;
+  - crash after sending but before the acknowledgement.
+
+  This is the same approach as LTC CT-02, CT-03, CT-08 and CT-20. Every attempt and outcome goes into an action ledger: typed, bounded, and never containing secrets.
+
+## 7. Sub-decisions (each unlocks one step; all PENDING)
+
+**PD-01.1. Adopt the classifier:** the two axes (sections 2 to 4) and the invariants S-1 to S-7 (section 5), with v1 shipping class 1a only.
+Recommendation: APPROVE. Decision: PENDING
+
+**PD-01.2. Every manifest declares a consequence level.** `critical` is refused until a certification path exists. Existing daemons would declare `standard`. This is a contract change, best batched with PD-35, PD-39 and PD-49.
+Recommendation: APPROVE. Decision: PENDING
+
+**PD-01.3. Unlock 1b (Sentinel).**
+- At half of `T`, write one typed `SENSE_DEGRADED` record per blind streak and update the systemd status line.
+- A shared escalation format, `spark-escalation/1` (typed, bounded, no observed free text), used by daemons and scripts alike.
+- A read-only `spark-daemon escalations` command that verifies the chain and emits JSON for the orchestrator.
+- Alerts never extend `T` (S-3).
+
+This is the smallest step, and it closes the silent-outage problem at its source.
+Recommendation: APPROVE. Decision: PENDING
+
+**PD-01.4. Unlock family 2 (Advisor, Analyst) after PD-61 and PD-62 are ruled on.** It needs a proposal envelope with no authority, and validation of proposals before a human sees them. An inference engine (2b) sees only typed escalation records and the verified ledger.
+Recommendation: DEFER until PD-61 and PD-62. Decision: PENDING
+
+**PD-01.5. Unlock 3a (Operator) after the activation register (PD-40) and the connector gate (PD-01.7) exist.** It needs a digest-bound runbook of reversible actions, one ticket per action, and an action ledger.
+Recommendation: DEFER. Decision: PENDING
+
+**PD-01.6. 3b (Actuator) is out of scope before kernel v2 and a certification path** (PD-60).
+Recommendation: DEFER to kernel v2. Decision: PENDING
+
+**PD-01.7. The connector gate:** design and conformance suite as in section 6, built before any class needs an outward connection.
+Recommendation: APPROVE the design direction; build when PD-01.5 is approached. Decision: PENDING
+
+**PD-01.8. Scripts adopt the same invariants.** A script's blind period is a run deadline. A script that observed nothing never reports success: it ends with a non-success result, a typed `SENSE_BLIND` reason, and the shared escalation record. The scripts live in the Spark Script Repository, so the exact result and exit code (under SC2) are the script board's decision.
+Recommendation: APPROVE the invariant; the script board sets the exit code. Decision: PENDING
+
+## 8. Open questions (for expansion)
+
+1. **Names.** Should these classes align with the script board's tiers (T0 Observe up to TS)? The board's exact tier definitions have not been compared with this ladder.
+2. **Class changes.** Can a daemon move between classes at run time, for example becoming a Sentinel only while elevated? Recommendation so far: no. The class is part of the approved manifest, and changing it means re-approval.
+3. **Alert delivery.** Is pull (ledger plus systemd status) enough for the elevated level, or does paging a human need a dedicated, declared alert connector behind the gate?
+4. **Runbook ownership.** Who writes and approves a 3a runbook action, and how is "reversible" proven and not merely claimed?
+5. **Multi-daemon effects.** When two Operators request conflicting actions, does the executor need an interlock, like railway routes?
+6. **Certification path.** Which standard, and which independent tester, would make `critical` possible at all?
+
+## 9. Expansion log
+
+Add entries at the end; never rewrite earlier ones.
+
+| Date | Entry | By | Summary |
+| --- | --- | --- | --- |
+| 2026-09-29 | Reopened | Owner | PD-01 reopened for review; the taxonomy discussed as three families with two levels |
+| 2026-09-29 | Consequence axis | Owner, Claude | "What if a life depended on it": consequence of failure separated from capability |
+| 2026-09-29 | Escalation | Owner, Claude | Blind daemons let the orchestrator know, so inference can propose a fix; proposals are never authority, and escalation never extends `T` |
+| 2026-09-29 | Scripts | Owner | The same invariants apply to scripts (PD-01.8) |
+| 2026-09-29 | Authentication | Owner, Claude | Connecting to systems with their own safety handoffs: authentication and handshakes never degrade (S-5, S-7, section 6) |
