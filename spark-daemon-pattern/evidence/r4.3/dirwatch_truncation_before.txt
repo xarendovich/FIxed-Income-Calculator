@@ -1,0 +1,12 @@
+# r4.2 dir-watch (before HF-33 fix), 2026-09-30T14:22:03Z, Linux 6.18.44-fc-v50
+## ext4
+add new000: REMOVED count=1, still present on disk: 1 of 1 listed
+add new001: REMOVED count=1, still present on disk: 1 of 1 listed
+add new002: REMOVED count=1, still present on disk: 1 of 1 listed
+files on disk: 620; MAX_ENTRIES=512; nothing was deleted
+spurious REMOVED names over 20 single-file additions: 17
+truncated flag carried on REMOVED events: False
+## tmpfs (/dev/shm)
+files on disk: 620; MAX_ENTRIES=512; nothing was deleted
+spurious REMOVED names over 20 single-file additions: 20
+truncated flag carried on REMOVED events: False

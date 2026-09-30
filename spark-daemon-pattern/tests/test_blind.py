@@ -307,6 +307,66 @@ class GitWatchUnsettledTests(unittest.TestCase):
         self.assertEqual((result["head"], result["dirty"]), ("main", 1))
 
 
+class DirWatchCapacityTests(unittest.TestCase):
+    """r4.3 (HF-33, LTC-H01): past MAX_ENTRIES, ctx.list_dir returns the first entries in
+    directory order. Diffing that partial listing as a full inventory reported files as
+    removed that were still present each time a file was added."""
+
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location(
+            "dir_watch", os.path.join(ROOT, "examples", "dir-watch", "daemon.py"))
+        self.daemon = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.daemon)
+        self.tmp = tempfile.mkdtemp()
+        self.daemon.WATCHED = self.tmp
+
+        class Policy:
+            def readable(self, path, follow=True):
+                return path
+        self.ctx = context.Context(Policy(), step_timeout=10, tmp_dir=self.tmp)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def touch(self, name):
+        open(os.path.join(self.tmp, name), "w").close()
+
+    def test_a_folder_over_the_cap_fails_the_cycle(self):
+        for i in range(self.daemon.MAX_ENTRIES + 1):
+            self.touch(f"f{i:05d}")
+        with self.assertRaises(context.TooLarge):
+            self.daemon.sense(self.ctx)
+
+    def test_adding_a_file_over_the_cap_never_reports_a_removal(self):
+        for i in range(self.daemon.MAX_ENTRIES + 88):
+            self.touch(f"f{i:05d}")
+        removed_but_present = []
+        for k in range(10):
+            try:
+                before = self.daemon.sense(self.ctx)
+            except context.TooLarge:
+                before = None
+            self.touch(f"new{k:03d}")
+            try:
+                after = self.daemon.sense(self.ctx)
+            except context.TooLarge:
+                continue
+            for kind, payload in self.daemon.decide(before, after):
+                if kind == "INBOX_ENTRIES_REMOVED":
+                    removed_but_present += [n for n in payload["names"]
+                                            if os.path.exists(os.path.join(self.tmp, n))]
+        self.assertEqual(removed_but_present, [])
+
+    def test_at_the_cap_the_inventory_is_complete(self):
+        for i in range(self.daemon.MAX_ENTRIES - 1):
+            self.touch(f"f{i:05d}")
+        before = self.daemon.sense(self.ctx)
+        self.touch("last")
+        after = self.daemon.sense(self.ctx)
+        self.assertEqual(len(after["entries"]), self.daemon.MAX_ENTRIES)
+        self.assertEqual([k for k, _ in self.daemon.decide(before, after)], ["INBOX_ENTRIES_ADDED"])
+
+
 class NoRestartTests(unittest.TestCase):
     def test_fail_closed_exits_are_never_restarted(self):
         m = manifest.load(os.path.join(EXAMPLE, "manifest.json"))

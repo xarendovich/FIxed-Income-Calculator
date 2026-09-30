@@ -1,0 +1,11 @@
+# r4.3 dir-watch (after the HF-33 fix), 2026-09-30T14:22:13Z, Linux 6.18.44-fc-v50
+## ext4
+files on disk: 620; MAX_ENTRIES=512; nothing was deleted
+spurious REMOVED names over 20 single-file additions: 0
+failed cycles (TooLarge): 20 of 20
+truncated flag carried on REMOVED events: n/a
+## tmpfs (/dev/shm)
+files on disk: 620; MAX_ENTRIES=512; nothing was deleted
+spurious REMOVED names over 20 single-file additions: 0
+failed cycles (TooLarge): 20 of 20
+truncated flag carried on REMOVED events: n/a

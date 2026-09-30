@@ -11,6 +11,10 @@ Two things every inventory daemon must handle, shown here:
 - inventories are unbounded: the snapshot is capped (MAX_ENTRIES) and every event lists
   at most MAX_NAMES_PER_EVENT names plus an exact count, so a folder of 100,000 files
   cannot exceed the ledger's record size.
+- a capped listing is never an inventory (r4.3, HF-33): past MAX_ENTRIES, the first entries
+  come back in directory order, which shifts whenever a file is added, so diffing them
+  reported files as removed that were still there. A folder over the cap is a failed cycle
+  (TooLarge), as git output over its cap is (HF-29), and counts towards the blind limit.
 ctx.stat does not follow symlinks and judges a link by where it sits, so a link planted in
 the folder is recorded as kind "link", never followed.
 """
@@ -26,7 +30,9 @@ def sense(ctx):
     try:
         listing = ctx.list_dir(WATCHED, max_entries=MAX_ENTRIES)
     except ctx.Missing:
-        return {"present": False, "entries": {}, "truncated": False}
+        return {"present": False, "entries": {}}
+    if listing.truncated:
+        raise ctx.TooLarge("more entries than MAX_ENTRIES")
     entries = {}
     for name in listing.names:
         try:
@@ -34,7 +40,7 @@ def sense(ctx):
         except ctx.Missing:
             continue                                   # removed between listing and stat
         entries[name[:NAME_CHARS]] = [info.kind, info.size, info.mtime_us]
-    return {"present": True, "entries": entries, "truncated": listing.truncated}
+    return {"present": True, "entries": entries}
 
 
 def _batch(names):
@@ -47,8 +53,7 @@ def decide(prev, snapshot):
     """Pure: diff two inventories into at most four bounded events."""
     now = snapshot["entries"]
     if prev is None:
-        return [("INBOX_BASELINE", {"present": snapshot["present"], "count": len(now),
-                                    "truncated": snapshot["truncated"]})]
+        return [("INBOX_BASELINE", {"present": snapshot["present"], "count": len(now)})]
     if prev["present"] != snapshot["present"]:
         return [("INBOX_AVAILABILITY_CHANGED", {"present": snapshot["present"], "count": len(now)})]
     before = prev["entries"]
@@ -74,7 +79,6 @@ def digest(snapshot, recent):
     rows = [("Folder", WATCHED),
             ("Present", snapshot["present"]),
             ("Entries", len(entries)),
-            ("Listing truncated", snapshot["truncated"]),
             ("Regular files, total bytes", total_bytes)]
     rows += [(f"Kind {kind}", count) for kind, count in sorted(kinds.items())]
     newest = sorted(entries.items(), key=lambda item: item[1][2], reverse=True)[:10]
