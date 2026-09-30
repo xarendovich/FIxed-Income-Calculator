@@ -3,7 +3,7 @@
 - **Status:** OPEN FOR EXPANSION. Reopened by the owner on 2026-09-29. Nothing in this document is decided; every sub-item is PENDING. New classes, invariants and questions are added below as numbered entries and listed in the expansion log (section 9), and nothing already recorded is rewritten.
 - **Supersedes:** the original PD-01 text, "Observe-only in v1. `daemon_class: act` is reserved and refused." That text came with the pattern as received. It was inherited from the Repository Observer (v0.3 §6.2, "observation never authorizes action") and was never ruled on.
 - **Code today:** unchanged. The manifest accepts only `daemon_class: observe`, which corresponds to class 1a below. Nothing here unlocks another class until its own sub-decision is recorded.
-- **Revision:** r3.6, 2026-09-29, by Claude, from the owner's discussion of the taxonomy, consequence of failure, escalation and authentication under erratic conditions.
+- **Revision:** r3.6, 2026-09-29, by Claude (extended through r4.2, 2026-09-30), from the owner's discussion of the taxonomy, consequence of failure, escalation and authentication under erratic conditions.
 
 ## 1. Why reopen it
 
@@ -136,6 +136,26 @@ Recommendation: APPROVE the invariant; the script board sets the exit code. Deci
 **PD-01.9. Critical consequence requires declared blind modes** (section 9b). Where a running process keeps a person safe, blindness is handled by a procedure declared and validated in advance, and executed by the side that still works. It is never handled by a stop, and never by improvisation. This is a precondition for ever accepting `critical` or unlocking 3b. It adds nothing for today's observers, whose declared blind mode is "stop and call a human".
 Recommendation: APPROVE as a precondition. **Decision: ADOPTED AS CORE PATTERN by the owner, 2026-09-30, as the "Blind Forester" protocol** (section 9b). The implementation conditions BF-1 to BF-6 are recommendations that shape how the ruling is built; they are PENDING owner confirmation.
 
+**PD-01.10. Break Glass: scope, premise and tiers** (`BREAK-GLASS.md` §2). An emergency starts only from a fixed rule over mechanical signals, never from model output (BG-1). Break glass reaches only declared external connections (`scope: external`). The validator and the relay refuse anything internal: loopback, Spark paths and sockets, the control plane, other daemons, the spark-core zone (BG-2 to BG-4). It comes in two tiers: BG-S, a fixed outbound beacon (1b over a declared connector), and BG-A, pre-signed survival manoeuvres on an external system, which by PD-01 §3 is class 3b.
+Recommendation: APPROVE the premise and scope rule; build BG-S after PD-01.3, PD-72 and PD-01.7; DEFER BG-A with 3b to kernel v2. Decision: PENDING
+
+**PD-01.11. The three mechanisms, as modified** (`BREAK-GLASS.md` §3).
+- **Egress.** A separate break-glass relay holds pre-granted egress to exactly the declared endpoint, is dormant by policy, and stops at fence. Landlock cannot be relaxed, and its network rules cannot name a host (BG-5). The alternative is a relay started only on a trip; the dormant relay is recommended.
+- **Socket.** The owner's revised form: epoch-bound, `/run/spark-emergency/`, the peer identified by `SO_PEERCRED`, a closed command set, a hardware key for a technician at the machine, removed at fence. The raw unauthenticated `/tmp` socket is rejected (BG-6).
+- **Envelopes.** Digest-bound, single-use and epoch-bound, issued only from a human-approved runbook, verified by the supervisor or relay, spent write-ahead (BG-7).
+Recommendation: APPROVE; the dormant relay rather than one started on demand. Decision: PENDING
+
+**PD-01.12. Emergency epochs and fencing** (`BREAK-GLASS.md` §4.1, BG-8 to BG-11). Every grant of authority belongs to one epoch. An epoch is opened by a trip, by the fence and by every boot. The gate fences at the external target ("highest epoch wins"; `single_path: true`). There is a rollback defence. An unplanned restart during an emergency ends break glass but not the survival loop. The alternative, allowing an emergency fenced by a crash to trip again with its old envelopes, is weaker.
+Recommendation: APPROVE, the conservative restart rule. Decision: PENDING
+
+**PD-01.13. The independent witness and the Emergency Flight Recorder** (`BREAK-GLASS.md` §4.2 and §4.3, BG-12 to BG-18).
+- **Witness.** Two independent signals, or 2-of-3, with an independence audit. The witness answers only "may emergency mode begin?".
+- **Recorder.** A separate, supervisor-written chain. Write-ahead ("no record, no action"). Preallocated space. Sealed at fence, with the head hash anchored with the orchestrator and the witness. Checked by an independent verifier.
+Recommendation: APPROVE. Decision: PENDING
+
+**PD-01.14. Operator-gated recovery boundary** (`BREAK-GLASS.md` §5, OR-1 to OR-8). The states: fence first (one durable epoch write); quarantined recovery with mandatory reconciliation; `SAFE_TO_ISOLATE` as a supervisor state that the dashboard only presents; the human boundary (`recovery_gate: operator`, required at `critical`); `HELD` with no timeout; a new epoch at boot; `REJOIN_PROBATION` with a closed checklist; a hard maximum emergency duration. The same path is the only exit from any survival mode, which completes BF-6.
+Recommendation: APPROVE, including its use as the Blind Forester's exit. Decision: PENDING
+
 ## 8. Open questions (for expansion)
 
 1. **Names.** Should these classes align with the script board's tiers (T0 Observe up to TS)? The board's exact tier definitions have not been compared with this ladder.
@@ -194,6 +214,17 @@ For observers, the survival action is fail closed, which drops nothing and is bu
 - **BF-5. The far side keeps its own procedure.** The supervisor still shares the DGX's kernel, power and disk. For anything at the critical consequence level, the downstream device keeps its own lost-link procedure (BM-2), so the Blind Forester is the first line of defence, not the last.
 - **BF-6. Leaving survival mode requires revalidation.** It takes accepted cycles in normal mode under a declared rule, and the exit is recorded. There is no silent return to normal (BM-4).
 
+## 9c. Break Glass for external connections, and operator-gated recovery (r4.2)
+
+The design and its reasoning are in `BREAK-GLASS.md`, with requirements BG-1 to BG-18 and OR-1 to OR-8. In brief:
+- **Premise and scope.** An emergency is a deterministic reflex, never a model's conclusion. It reaches only declared external systems, and never Spark's own confinement, control plane or authentication.
+- **The three mechanisms,** as adjudicated: dormant egress held by a separate relay; an identified survival socket that exists only during an emergency epoch; pre-signed, single-use envelopes.
+- **Bounded by** emergency epochs with fencing (reaching the external target), an independent witness, and a write-ahead Emergency Flight Recorder.
+- **Two tiers.** A beacon (BG-S), which can come after PD-01.3, PD-72 and PD-01.7. Acting on external systems (BG-A) is class 3b.
+- **Exit** through an operator-gated recovery boundary: fence, reconcile, `SAFE_TO_ISOLATE`, a human decision, a new epoch, probation.
+
+Sub-decisions PD-01.10 to PD-01.14 (section 7).
+
 ## 9. Expansion log
 
 Add entries at the end; never rewrite earlier ones.
@@ -209,3 +240,4 @@ Add entries at the end; never rewrite earlier ones.
 | 2026-09-29 | Universal contract | Owner, Claude | Alignment with the L0 to L4 stack and rules U-1 to U-3; four further considerations (U-4 temporal honesty, adding S-8; U-5 stop and revocation; U-6 cumulative bounds, measured; U-7 assurance of the assurance), PD-64 to PD-68 in `ADJUDICATION-PLUG-AND-PLAY.md` section 9 |
 | 2026-09-30 | Blind modes | Owner, Claude | Life depending on a running process: blind is a declared mode, run by the side that still works (BM-1 to BM-7, section 9b, PD-01.9); limit-interaction findings and the integration plan in `INTEGRATION-REVIEW.md` |
 | 2026-09-30 | Blind Forester adopted | Owner, Claude | PD-01.9 adopted as core pattern (owner); implementation conditions BF-1 to BF-6 proposed (section 9b); PD-70 adopted and built (contract 3.0.0) |
+| 2026-09-30 | Break Glass | Owner, Claude | Break Glass Protocol for external connections only: a reflex, never a model decision. Three mechanisms adjudicated; the owner's epoch fencing, independent witness, flight recorder and operator-gated recovery (`SAFE_TO_ISOLATE`, `REJOIN_PROBATION`) merged into one state machine (`BREAK-GLASS.md`, section 9c, PD-01.10 to PD-01.14) |
