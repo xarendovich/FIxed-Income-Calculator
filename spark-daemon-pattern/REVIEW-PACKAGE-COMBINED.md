@@ -1,5 +1,7 @@
 # Spark Daemon Pattern: review and decision package (r4.4)
 
+> **Update (r4.5):** the items below are now adjudicated in `ADJUDICATION-R4.5.md`. PD-70's clock basis is built (HF-34), and the battery has a new check, DB-20 (HF-35). The implementation-status table below is as of r4.4.
+
 - **Status:** PROPOSED FOR INDEPENDENT REVIEW. NOT ADJUDICATED. It authorizes no LTC version change, no daemon class unlock and no activation. Where it recommends amending a settled ruling, the owner decides.
 - **Date:** 2026-09-30. Prepared by Claude for the owner, to hand to other reviewers (people or models).
 - **Repository state:** `spark-daemon-pattern/` at revision r4.4, on branch `claude/clever-bardeen-qqkxez`:

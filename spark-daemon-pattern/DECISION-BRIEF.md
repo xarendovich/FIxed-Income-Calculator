@@ -1,5 +1,7 @@
 # Decision brief: the settled rulings revisited, and the open choices with their pros and cons
 
+> **Update (r4.5):** these choices are now adjudicated in `ADJUDICATION-R4.5.md`. The PD-70 clock-basis amendment is built (HF-34, contract 3.1.0).
+
 - **Status:** FOR REVIEW AND ADJUDICATION. Written as a handoff: other reviewers (people or models) can mark it without the repository. Nothing here changes a ruling. Where it recommends amending one, the owner decides.
 - **Revision:** r4.4, 2026-09-30, by Claude.
 - **Asked:** the owner asked, "Are any of the closed rulings worth revisiting? Can you provide a handoff document that reviews the choices and recommendations to make, along with pros and cons."

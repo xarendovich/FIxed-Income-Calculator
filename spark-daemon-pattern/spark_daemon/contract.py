@@ -28,7 +28,7 @@ from . import proc, purity, render, unitgen
 from .canonical import MAX_SAFE_INT, canonical_bytes, sha256_hex
 
 CONTRACT_SCHEMA = "spark-daemon-contract/1"
-CONTRACT_VERSION = "3.0.0"
+CONTRACT_VERSION = "3.1.0"
 CANDIDATE_SCHEMA = "spark-daemon-candidate/1"
 VALIDATE_SCHEMA = "spark-daemon-validate/1"
 PRECHECK_SCHEMA = "spark-daemon-precheck/1"
@@ -285,13 +285,18 @@ def contract_body() -> dict:
                         "the limit; the limit, not the watchdog, catches a daemon that sees nothing",
             "across_restarts": "the blind clock survives restarts (PD-70): at start-up it begins at the latest "
                                "evidence of an accepted cycle in the verified ledger (a daemon event, or the "
-                               "last_accepted_utc of a heartbeat or clean stop), measured on the wall clock; a "
+                               "last_accepted_utc of a heartbeat or clean stop). Within one boot it is measured on "
+                               "CLOCK_BOOTTIME (boot_id, boottime_ms and blind_since_boottime_ms in "
+                               "DAEMON_START, DAEMON_HEARTBEAT and DAEMON_STOP), so no wall-clock step moves "
+                               "it; across a reboot on the wall clock, and if that went back, blind at the "
+                               "limit is assumed; DAEMON_START and SENSE_BLIND record the clock_basis; a "
                                "fresh ledger starts at zero. A restart that inherits more than the limit gets one "
                                "reacquisition cycle, then SENSE_BLIND without a fresh countdown. Neither an "
                                "operator restart nor a clean stop resets it; only an accepted cycle does",
             "heartbeat": "DAEMON_HEARTBEAT every blind_limit_seconds / 2: mode (observing or blind), "
                          "last_accepted_utc (null before the first accepted cycle), blind_ms, and the accepted, "
-                         "unsettled and failed cycle counts since the previous heartbeat",
+                         "unsettled and failed cycle counts since the previous heartbeat, and the boot stamp "
+                         "(boot_id, boottime_ms, blind_since_boottime_ms)",
             "blind_forester": {
                 "observe": "fail closed: SENSE_BLIND, exit 78, never restarted (the only class in this contract)",
                 "active_classes": "a pre-validated survival loop (PD-01.9) is not available in contract 3.x; it "

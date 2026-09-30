@@ -1,0 +1,9 @@
+# 2026-09-30T17:04:34Z Linux 6.18.44-fc-v50; contract 3.1.0 (r4.5 code, after the HF-34 fix)
+control: real clock throughout:
+  exits: ['killed', 78]
+  inherited_blind_ms per start: [0, 1000]
+  SENSE_BLIND records: 1
+clock stepped back 1 h after run 1:
+  exits: ['killed', 78]
+  inherited_blind_ms per start: [0, 1012]
+  SENSE_BLIND records: 1

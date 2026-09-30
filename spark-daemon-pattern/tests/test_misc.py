@@ -106,7 +106,8 @@ class BatteryTests(unittest.TestCase):
         report_path = re.search(r"report: (\S+)", p.stdout).group(1)
         with open(report_path) as fh:
             report = json.load(fh)
-        self.assertEqual(len(report["checks"]), 18)
+        self.assertEqual([c["id"] for c in report["checks"]][-2:], ["DB-18", "DB-20"])   # DB-19 reserved (PD-76)
+        self.assertEqual(len(report["checks"]), 19)
         self.assertEqual(report["schema"], "spark-daemon-battery/1")
 
     def test_impure_daemon_fails(self):

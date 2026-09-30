@@ -160,6 +160,89 @@ class BlindPeriodTests(unittest.TestCase):
         starts = [r["payload"] for r in sb.records() if r["event_type"] == "DAEMON_START"]
         self.assertGreater(starts[-1]["inherited_blind_ms"], 0)
 
+    # ---- r4.5 (HF-34): a wall-clock step must not reset inherited blindness ----
+
+    SHIFTED = ("import datetime as d, runpy, sys\n"
+               "real = d.datetime\n"
+               "class Behind(real):\n"
+               "    @classmethod\n"
+               "    def now(cls, tz=None):\n"
+               "        return real.now(tz) - d.timedelta(seconds={shift})\n"
+               "d.datetime = Behind\n"
+               "sys.argv = [{entry!r}] + sys.argv[1:]\n"
+               "runpy.run_path({entry!r}, run_name='__main__')\n")
+
+    def popen_shifted(self, sb, limit_ms, shift_seconds):
+        """Runs the daemon with its wall clock `shift_seconds` behind; the system clock is untouched."""
+        code = self.SHIFTED.format(shift=shift_seconds, entry=ENTRY)
+        return subprocess.Popen([sys.executable, "-I", "-B", "-c", code, "run", "--manifest", sb.manifest],
+                                env=sb.env(SPARK_DAEMON_TEST_BLIND_LIMIT_MS=str(limit_ms)),
+                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+
+    def test_a_backward_clock_step_does_not_hide_blindness(self):
+        # On r4.4 every restart after a one-hour backward step inherited 0 ms, and six kill-restarts
+        # (6 s blind against a 1.5 s limit) never reached SENSE_BLIND (evidence/r4.5/).
+        sb = self.sandbox(MODE_DRIVEN)
+        sb.write("data/mode.txt", "busy")
+        code = None
+        for i in range(6):
+            p = self.popen_shifted(sb, 1500, 3600 if i else 0)
+            try:
+                code = p.wait(timeout=1.0)
+                p.stderr.close()
+                break
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.communicate()
+        self.assertEqual(code, EXIT_SENSE_BLIND)
+        blind = self.blind_records(sb)
+        self.assertEqual(len(blind), 1)
+        self.assertEqual(blind[0]["clock_basis"], "boottime")
+        self.assertGreater(blind[0]["inherited_ms"], 0)
+
+    def test_start_heartbeat_and_stop_carry_the_boot_stamp(self):
+        sb = self.sandbox(MODE_DRIVEN)
+        sb.write("data/mode.txt", "busy")
+        self.assertEqual(self.finish(self.popen(sb, 400, cycles=4))[0], EXIT_OK)
+        records = {r["event_type"]: r["payload"] for r in sb.records()}
+        with open("/proc/sys/kernel/random/boot_id") as fh:
+            boot = fh.read().strip()
+        for kind in ("DAEMON_START", "DAEMON_HEARTBEAT", "DAEMON_STOP"):
+            payload = records[kind]
+            self.assertEqual(payload["boot_id"], boot, kind)
+            self.assertLessEqual(payload["blind_since_boottime_ms"], payload["boottime_ms"], kind)
+        self.assertEqual(records["DAEMON_START"]["clock_basis"], "fresh")
+
+    def test_across_a_reboot_the_wall_clock_is_used_and_a_backward_one_assumes_the_worst(self):
+        from spark_daemon import runtime
+        other_boot = runtime._AcceptEvidence()
+        other_boot.anchor = ("00000000-0000-0000-0000-000000000000", 5)
+        past = "2000-01-01T00:00:00.000000Z"
+        future = "2999-01-01T00:00:00.000000Z"
+        seconds, basis = runtime._inherited_blindness(3, other_boot, runtime._boot_id(), past, 60)
+        self.assertEqual(basis, "wall")
+        self.assertGreater(seconds, 60)
+        self.assertEqual(runtime._inherited_blindness(3, other_boot, runtime._boot_id(), future, 60),
+                         (60.0, "worst_case"))
+        self.assertEqual(runtime._inherited_blindness(0, other_boot, runtime._boot_id(), None, 60), (0.0, "fresh"))
+
+    def test_an_event_after_the_last_stamp_is_anchored_at_that_stamp(self):
+        # A daemon event carries no boot time; the preceding stamp bounds it from below (safe side).
+        from spark_daemon import runtime
+        ev = runtime._AcceptEvidence()
+        boot = "11111111-1111-1111-1111-111111111111"
+        ev.observe({"event_type": "DAEMON_START", "timestamp_utc": "t0",
+                    "payload": {"boot_id": boot, "boottime_ms": 1000, "blind_since_boottime_ms": 400}})
+        self.assertEqual(ev.anchor, (boot, 400))
+        ev.observe({"event_type": "VALUE_OBSERVED", "timestamp_utc": "t1", "payload": {"value": "1"}})
+        self.assertEqual(ev.anchor, (boot, 1000))
+        ev.observe({"event_type": "DAEMON_HEARTBEAT", "timestamp_utc": "t2",
+                    "payload": {"boot_id": boot, "boottime_ms": 9000, "blind_since_boottime_ms": 8500,
+                                "last_accepted_utc": "t1"}})
+        self.assertEqual(ev.anchor, (boot, 8500))
+        ev.observe({"event_type": "DAEMON_STOP", "timestamp_utc": "t3", "payload": {"last_accepted_utc": "t1"}})
+        self.assertIsNone(ev.anchor)      # an older record without a stamp: no boot-time evidence
+
     def test_a_clean_stop_does_not_reset_blindness(self):
         sb = self.sandbox(MODE_DRIVEN)
         sb.write("data/mode.txt", "busy")

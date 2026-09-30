@@ -1,0 +1,4 @@
+# 2026-09-30T17:22:41Z Linux 6.18.44-fc-v50; writer as root, reader as uid 65534; system sqlite 3.45.1
+writer open: files ['ledger.db', 'ledger.db-shm', 'ledger.db-wal']; reader rows: 1
+after a second commit, writer open: files ['ledger.db', 'ledger.db-shm', 'ledger.db-wal']; reader rows: 2
+writer closed: files ['ledger.db']; reader failed: OperationalError attempt to write a readonly database

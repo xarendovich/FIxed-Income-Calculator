@@ -25,6 +25,10 @@ RESULT is PASS only when nothing FAILs and nothing is UNKNOWN; otherwise FAIL, o
  DB-16 verification is read-only and repeatable
  DB-17 Landlock still blocks a forbidden operation with the audit hook in record-only mode (r2)
  DB-18 DAEMON_START.landlock is present and matches this host's ABI and the manifest's gaps (r2)
+ DB-20 the daemon observes: accepted cycles, and no SENSE_BLIND within a short blind limit (r4.5)
+
+DB-19 is reserved for the direct cgroup memory reading (PD-76; the v0.1 line's registry). A
+check whose meaning changes gets a new ID instead of an edit (PD-78).
 """
 
 import json
@@ -524,6 +528,37 @@ def db14(ws, c):
         f"whole process incl. start-up {p.cpu_s * 1000:.0f} ms CPU")
 
 
+def db20(ws, c, cycles=12, limit_intervals=5):
+    """r4.5 (HF-35): the daemon observes. A daemon whose every cycle is unsettled records no
+    error, so DB-04 and every other check passed it: the battery gave PASS to a daemon that never
+    saw anything. Runs the daemon with a blind limit of a few test intervals; it must accept
+    cycles and must not stop with SENSE_BLIND."""
+    ws.reset_output()
+    limit_ms = limit_intervals * TEST_INTERVAL_MS
+    p = run_proc(ws.run_cmd(cycles=cycles), ws.env(SPARK_DAEMON_TEST_BLIND_LIMIT_MS=str(limit_ms)))
+    recs = _records(ws.ledger)
+    blind = [r["payload"] for r in recs
+             if r["event_type"] == "DAEMON_ERROR" and r["payload"].get("category") == "SENSE_BLIND"]
+    beats = [r["payload"] for r in recs if r["event_type"] == "DAEMON_HEARTBEAT"]
+    accepted = sum(b.get("accepted_cycles", 0) for b in beats)
+    missed = sum(b.get("unsettled_cycles", 0) + b.get("failed_cycles", 0) for b in beats)
+    if blind:
+        b = blind[0]
+        c.state = "FAIL"
+        c.evidence = (f"SENSE_BLIND after {b.get('blind_ms')} ms against a {limit_ms} ms limit: no accepted "
+                      f"cycle; last cause {b.get('last_cause')} ({b.get('last_cause_kind')})")
+    elif p.code != 0:
+        c.state, c.evidence = "FAIL", f"run exited {p.code}"
+    elif not beats:
+        c.state, c.evidence = "UNKNOWN", f"no DAEMON_HEARTBEAT in {cycles} cycles to count accepted cycles"
+    elif accepted == 0:
+        c.state, c.evidence = "FAIL", f"{len(beats)} heartbeat(s) and no accepted cycle"
+    else:
+        c.state = "PASS"
+        c.evidence = (f"{accepted} accepted and {missed} unsettled or failed cycle(s) across {len(beats)} "
+                      f"heartbeat(s); no SENSE_BLIND within a {limit_ms} ms limit")
+
+
 def db15(ws, c, threshold):
     text = unitgen.generate(ws.m, root=PATTERN_ROOT)
     missing = unitgen.lint(text)
@@ -686,6 +721,7 @@ def main(manifest_path: str, *, seed: int, quick: bool, workdir: str | None, thr
         "audit hook blocks forbidden operations", "resource budget", "unit hardening",
         "read-only verification", "Landlock blocks with the audit hook record-only",
         "DAEMON_START.landlock matches host and manifest"], start=1)]
+    checks.append(Check("DB-20", "observes within a blind limit"))
     by_id = {c.id: c for c in checks}
 
     m = db01(ws, by_id["DB-01"])
@@ -709,6 +745,7 @@ def main(manifest_path: str, *, seed: int, quick: bool, workdir: str | None, thr
             ("DB-16", lambda c: db16(ws, c)),
             ("DB-17", lambda c: db17(ws, c)),
             ("DB-18", lambda c: db18(ws, c)),
+            ("DB-20", lambda c: db20(ws, c)),
         ]
         for cid, fn in steps:
             try:

@@ -394,6 +394,19 @@ class BatteryCatchesAlwaysFailingDaemonsTests(unittest.TestCase):
         finally:
             shutil.rmtree(work)
 
+    def test_a_daemon_that_never_observes_fails_db20(self):
+        # r4.5 (HF-35): every cycle unsettled means no DAEMON_ERROR and no event; with its digest
+        # disabled, r4.4's battery reported RESULT: PASS for it.
+        work = tempfile.mkdtemp(prefix="battery-report-")
+        try:
+            p = cli("battery", "--quick", "--manifest", os.path.join(FIXTURES, "neverseeing", "manifest.json"),
+                    "--workdir", work, timeout=300)
+            self.assertRegex(p.stdout, r"DB-04\s+PASS")               # the chain itself is fine
+            self.assertRegex(p.stdout, r"DB-20\s+FAIL\s.*SENSE_BLIND.*NEVER_SETTLES")
+            self.assertTrue(p.stdout.strip().endswith("RESULT: FAIL"))
+        finally:
+            shutil.rmtree(work)
+
 
 if __name__ == "__main__":
     unittest.main()

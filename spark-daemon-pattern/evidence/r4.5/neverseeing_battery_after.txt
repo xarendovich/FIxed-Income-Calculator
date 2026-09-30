@@ -1,0 +1,21 @@
+# r4.5 battery (after HF-35 fix, DB-20), 2026-09-30T17:11:02Z, Linux 6.18.44-fc-v50: tests/fixtures/daemons/neverseeing
+DB-01  PASS       manifest validates                               manifest sha256 526cef65287e60b2
+DB-02  PASS       purity check                                     no findings
+DB-03  PASS       confinement                                      5 cycles; 0 audit events; no file outside the output directory changed
+DB-04  PASS       ledger integrity and provenance                  2 records; chain head ffa97df6093ef162; provenance matches
+DB-05  PASS       crash and restart                                3 kills at [0.82, 0.464, 0.893] s; 4 starts recorded, all after the first flagged unclean; 0 torn tail(s) quarantined; chain verifies
+DB-06  PASS       torn-tail quarantine                             both torn tails quarantined byte-for-byte, recorded, chain verifies
+DB-07  PASS       refuses a corrupt ledger                         flipped one byte in record 7: refused with exit 65, nothing changed
+DB-08  PASS       fsync failure                                    exit 70 under injected fsync EIO; restart recovered; chain verifies (+3 records)
+DB-09  PASS       disk-full failure                                exit 70 under injected write ENOSPC; restart recovered; chain verifies (+2 records)
+DB-10  N/A        digest containment                               {"status": "N/A", "reason": "digest disabled"}
+DB-11  PASS       notify protocol                                  READY after DAEMON_START; 12 pings, longest gap 0.20 s; STOPPING at exit
+DB-12  PASS       single instance and SIGTERM                      second instance refused (73); SIGTERM gave DAEMON_STOP and exit 0
+DB-13  PASS       audit hook blocks forbidden operations           10 forbidden operations blocked and counted; output-dir write allowed
+DB-14  PASS       resource budget                                  3.40 ms CPU per cycle over 21 cycles, projected 0.068% at a 5 s interval (budget 1.00%); peak RSS 20.0 MiB (limit 64); whole process incl. start-up 149 ms CPU
+DB-15  PASS       unit hardening                                   all required directives present; systemd-analyze offline exposure 0.8 (threshold 2.0); start-up syscalls permitted by the unit's seccomp filter
+DB-16  PASS       read-only verification                           two read-only verifications agree (seq 22, chain head 059c99b298ed79e9); bytes and mtime unchanged
+DB-17  PASS       Landlock blocks with the audit hook record-only  ABI 7: with the audit hook in record-only mode, the kernel alone still blocked the forbidden write and the denied read; TCP connect also blocked (EACCES)
+DB-18  PASS       DAEMON_START.landlock matches host and manifest  DAEMON_START.landlock: ABI 7, status enforced, 0 gap(s); matches this host's ABI and the manifest's own gaps
+DB-20  FAIL       observes within a blind limit                    SENSE_BLIND after 1017 ms against a 1000 ms limit: no accepted cycle; last cause NEVER_SETTLES (unsettled)
+RESULT: FAIL

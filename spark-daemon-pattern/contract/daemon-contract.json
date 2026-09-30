@@ -1,7 +1,7 @@
 {
   "schema": "spark-daemon-contract/1",
-  "contract_version": "3.0.0",
-  "contract_sha256": "55ddf99d64f2b5a0bc2db3949f0a7ed8e3ddb0b6a7679fbe71250b6e02ce6e49",
+  "contract_version": "3.1.0",
+  "contract_sha256": "2d00dda2c1b1d389081f0d354341588106722b61dbf27a5b0791dfe8324ee159",
   "skeleton_version": "0.3.0",
   "contract": {
     "manifest": {
@@ -573,8 +573,8 @@
       "failed": "sense() or decide() raised, or returned invalid data: DAEMON_ERROR (repeats collapsed)",
       "blind_limit": "no accepted cycle for blind_limit_seconds (monotonic clock), whether from unsettled or failed cycles: DAEMON_ERROR category SENSE_BLIND with blind_ms, limit_ms, unsettled_cycles, failed_cycles, last_cause and last_cause_kind; then exit 78",
       "watchdog": "pinged from the main loop throughout, including unsettled and failed cycles within the limit; the limit, not the watchdog, catches a daemon that sees nothing",
-      "across_restarts": "the blind clock survives restarts (PD-70): at start-up it begins at the latest evidence of an accepted cycle in the verified ledger (a daemon event, or the last_accepted_utc of a heartbeat or clean stop), measured on the wall clock; a fresh ledger starts at zero. A restart that inherits more than the limit gets one reacquisition cycle, then SENSE_BLIND without a fresh countdown. Neither an operator restart nor a clean stop resets it; only an accepted cycle does",
-      "heartbeat": "DAEMON_HEARTBEAT every blind_limit_seconds / 2: mode (observing or blind), last_accepted_utc (null before the first accepted cycle), blind_ms, and the accepted, unsettled and failed cycle counts since the previous heartbeat",
+      "across_restarts": "the blind clock survives restarts (PD-70): at start-up it begins at the latest evidence of an accepted cycle in the verified ledger (a daemon event, or the last_accepted_utc of a heartbeat or clean stop). Within one boot it is measured on CLOCK_BOOTTIME (boot_id, boottime_ms and blind_since_boottime_ms in DAEMON_START, DAEMON_HEARTBEAT and DAEMON_STOP), so no wall-clock step moves it; across a reboot on the wall clock, and if that went back, blind at the limit is assumed; DAEMON_START and SENSE_BLIND record the clock_basis; a fresh ledger starts at zero. A restart that inherits more than the limit gets one reacquisition cycle, then SENSE_BLIND without a fresh countdown. Neither an operator restart nor a clean stop resets it; only an accepted cycle does",
+      "heartbeat": "DAEMON_HEARTBEAT every blind_limit_seconds / 2: mode (observing or blind), last_accepted_utc (null before the first accepted cycle), blind_ms, and the accepted, unsettled and failed cycle counts since the previous heartbeat, and the boot stamp (boot_id, boottime_ms, blind_since_boottime_ms)",
       "blind_forester": {
         "observe": "fail closed: SENSE_BLIND, exit 78, never restarted (the only class in this contract)",
         "active_classes": "a pre-validated survival loop (PD-01.9) is not available in contract 3.x; it requires an Act-family class, the supervisor/worker split (PD-72) and pre-authorized survival actions"
