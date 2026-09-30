@@ -24,6 +24,7 @@ spark-daemon-pattern/
   ADJUDICATION-PLUG-AND-PLAY.md  r3.3-r3.8 plug-and-play stack, framework/services boundary, kernel v2 agenda,
                             universal-contract alignment and U-1..U-7: PD-46..PD-68
   PD-01-DAEMON-CLASSES.md   r3.6 PD-01 reopened: daemon classes, consequence levels, safety invariants (open for expansion)
+  REVIEW-PACKAGE-R4.5.md    r4.5 the three r4.5 documents in one, for secondary reviewers (PDF in handoff/)
   ADJUDICATION-R4.5.md      r4.5 adjudication of the r4.2-r4.4 improvements (delegated by the owner); HF-34, HF-35
   BATTERY-REVIEW-R4.5.md    r4.5 conformance battery review, code map, gaps, planned checks, full self-test list
   SQLITE-LEDGER-REVIEW.md   r4.5 review of the three-ledger SQLite store, systemd.path wake and UDS IPC: PD-87..PD-92
