@@ -1,0 +1,4 @@
+# 2026-09-30T14:55:22Z Linux 6.18.44-fc-v50, running as root, no systemd user manager
+per-process peaks: daemon 90 MiB, largest child 128 MiB
+DB-14 basis today, max(daemon, child): 128 MiB
+cgroup v1 memory.max_usage_in_bytes (daemon + every child): 208 MiB

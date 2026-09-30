@@ -64,7 +64,15 @@ A **daemon** is a long-running Spark process. The pattern has three parts:
 - **Landlock ABI 7 comes from the build workspace.** The DGX's ABI is inferred (`ADJUDICATION-AP.md`).
 - **No test ran on DGX hardware.**
 
-## 2. Owner rulings already made (settled; do not reopen)
+## 2. Owner rulings already made (settled)
+
+Do not reopen these here. The owner asked separately whether any is worth revisiting. `DECISION-BRIEF.md` §2 answers that: none should be reversed, and each has one proposed amendment or clarification:
+- PD-63: separate exit codes for a policy violation and `SENSE_BLIND`;
+- PD-70: measure inherited blindness on `CLOCK_BOOTTIME` within a boot;
+- PD-01.9: state that it does not unlock `critical`, and make BF-5 mandatory;
+- PD-76: accept a direct reading from either cgroup version (measured: 208 MiB for the cgroup against DB-14's 128 MiB).
+
+Review those amendments there.
 
 | Ruling | What it settled | Still open for review |
 | --- | --- | --- |
@@ -227,7 +235,7 @@ These are compact. Each is set out in full in the file named.
 | PD-01.3 | Unlock 1b Sentinel: `SENSE_DEGRADED` at `T`/2, the `spark-escalation/1` format, a read-only escalations command | APPROVE | same |
 | PD-69 | Limits are checked against each other (U-8), and every new timeout goes in a budget table | APPROVE | `INTEGRATION-REVIEW.md` §5 |
 | PD-71 (the part PD-76 does not cover) | A named worst-case fixture per observation type; a scaling series to derive `N_max` | APPROVE | same |
-| PD-76, open part | How the workspace and CI treat `INCOMPLETE` where no systemd user manager exists | Decide before building DB-19 | `RECONCILIATION-V01-LINE.md` §3 |
+| PD-76, open part | How the workspace and CI treat `INCOMPLETE`. Since r4.4, a direct reading is shown to be possible here without systemd, so `INCOMPLETE` should be rare | Require PASS where a direct reading is possible (`DECISION-BRIEF.md` §2.4) | `RECONCILIATION-V01-LINE.md` §3 |
 | PD-75 to PD-81 | Alias of the v0.1 line's PD-23 to PD-29, or renumber this repository's | Confirm the alias | same, §2 |
 | C-1 (with PD-81) | Battery exit codes. Here: PASS 0, INCOMPLETE 3, FAIL 1. v0.1 line: PASS 0, FAIL 3, INCOMPLETE 4 | Adopt the v0.1 line's codes (0, 3, 4) in the batched contract change | same, §4 |
 | PD-64 to PD-68 | Universal-contract rules: stack alignment; temporal honesty (S-8); stop and revocation; cumulative bounds; assurance of the assurance | APPROVE | `ADJUDICATION-PLUG-AND-PLAY.md` §9 |
