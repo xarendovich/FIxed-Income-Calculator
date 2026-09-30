@@ -114,6 +114,94 @@ class BlindPeriodTests(unittest.TestCase):
         self.assertEqual(types[-1], "DAEMON_STOP")
         self.assertNotIn("DAEMON_ERROR", types)
 
+    # ---- r4.0 (PD-70): blindness survives restarts; heartbeats tell quiet from dead ----
+
+    def popen(self, sb, limit_ms, cycles=None):
+        cmd = [sys.executable, "-I", "-B", ENTRY, "run", "--manifest", sb.manifest]
+        if cycles is not None:
+            cmd += ["--max-cycles", str(cycles)]
+        return subprocess.Popen(cmd, env=sb.env(SPARK_DAEMON_TEST_BLIND_LIMIT_MS=str(limit_ms)),
+                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+
+    def finish(self, p, timeout=30):
+        """Wait for a run and close its stderr pipe; returns (exit code, stderr)."""
+        try:
+            err = p.communicate(timeout=timeout)[1]
+        finally:
+            if p.poll() is None:
+                p.kill()
+                p.communicate()
+        return p.returncode, err
+
+    def blind_records(self, sb):
+        return [r["payload"] for r in sb.records()
+                if r["event_type"] == "DAEMON_ERROR" and r["payload"].get("category") == "SENSE_BLIND"]
+
+    def test_blindness_survives_a_restart_loop(self):
+        # HF-32: killed and restarted every 1.0 s against a 1.5 s limit. On r3.9 no run ever
+        # reached the limit; now the second run inherits the first run's blindness.
+        sb = self.sandbox(MODE_DRIVEN)
+        sb.write("data/mode.txt", "busy")
+        code = None
+        for _ in range(6):
+            p = self.popen(sb, 1500)
+            try:
+                code = p.wait(timeout=1.0)
+                p.stderr.close()
+                break
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.communicate()
+        self.assertEqual(code, EXIT_SENSE_BLIND)
+        blind = self.blind_records(sb)
+        self.assertEqual(len(blind), 1)
+        self.assertGreater(blind[0]["inherited_ms"], 0)
+        self.assertIsNone(blind[0]["last_accepted_utc"])      # never saw anything accepted
+        starts = [r["payload"] for r in sb.records() if r["event_type"] == "DAEMON_START"]
+        self.assertGreater(starts[-1]["inherited_blind_ms"], 0)
+
+    def test_a_clean_stop_does_not_reset_blindness(self):
+        sb = self.sandbox(MODE_DRIVEN)
+        sb.write("data/mode.txt", "busy")
+        self.assertEqual(self.finish(self.popen(sb, 3000, cycles=10))[0], EXIT_OK)   # ~1 s, then DAEMON_STOP
+        started = time.monotonic()
+        self.assertEqual(self.finish(self.popen(sb, 3000))[0], EXIT_SENSE_BLIND)
+        self.assertLess(time.monotonic() - started, 2.7)      # a fresh countdown would need 3 s
+        self.assertGreater(self.blind_records(sb)[0]["inherited_ms"], 900)
+
+    def test_a_restart_past_the_limit_gets_one_reacquisition_cycle(self):
+        sb = self.sandbox(MODE_DRIVEN)
+        sb.write("data/mode.txt", "busy")
+        sb.write("data/value.txt", "7")
+        self.assertEqual(self.finish(self.popen(sb, 800))[0], EXIT_SENSE_BLIND)
+        # Still blind on restart: SENSE_BLIND after one cycle, with no fresh countdown.
+        self.assertEqual(self.finish(self.popen(sb, 800))[0], EXIT_SENSE_BLIND)
+        second = self.blind_records(sb)[-1]
+        self.assertGreaterEqual(second["inherited_ms"], 800)
+        self.assertEqual(second["unsettled_cycles"], 1)
+        # Seeing again on restart: the one reacquisition cycle is accepted and the run carries on.
+        sb.write("data/mode.txt", "idle")
+        code, err = self.finish(self.popen(sb, 800, cycles=3))
+        self.assertEqual(code, EXIT_OK, err)
+        types = self.types(sb)
+        self.assertEqual(types[-3:], ["DAEMON_START", "VALUE_OBSERVED", "DAEMON_STOP"])
+        self.assertEqual(len(self.blind_records(sb)), 2)
+
+    def test_heartbeats_tell_quiet_from_dead(self):
+        # A healthy daemon that sees no change still leaves evidence every limit/2.
+        sb = self.sandbox(MODE_DRIVEN)
+        sb.write("data/mode.txt", "idle")
+        sb.write("data/value.txt", "same")
+        code, err = self.finish(self.popen(sb, 600, cycles=15))   # about 1.5 s at 100 ms
+        self.assertEqual(code, EXIT_OK, err)
+        beats = [r["payload"] for r in sb.records() if r["event_type"] == "DAEMON_HEARTBEAT"]
+        self.assertGreaterEqual(len(beats), 2)
+        self.assertEqual({b["mode"] for b in beats}, {"observing"})
+        self.assertTrue(all(b["last_accepted_utc"] for b in beats))
+        self.assertTrue(all(b["accepted_cycles"] > 0 for b in beats))
+        stop = sb.records()[-1]["payload"]
+        self.assertIsNotNone(stop["last_accepted_utc"])
+
     def test_a_malformed_reason_is_a_sense_failure(self):
         sb = self.sandbox("def sense(ctx):\n    return ctx.unsettled('not a category')\n" + DECIDE)
         p = sb.run(cycles=2)

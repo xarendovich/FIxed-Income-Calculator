@@ -387,7 +387,8 @@
                 "DAEMON_STOP",
                 "DAEMON_ERROR",
                 "DAEMON_ERROR_CLEARED",
-                "LEDGER_TAIL_QUARANTINED"
+                "LEDGER_TAIL_QUARANTINED",
+                "DAEMON_HEARTBEAT"
               ]
             }
           },

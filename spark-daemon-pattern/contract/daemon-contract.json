@@ -1,13 +1,13 @@
 {
   "schema": "spark-daemon-contract/1",
-  "contract_version": "2.0.0",
-  "contract_sha256": "cdf10247c7e4d9e63d071d882cfe978b0107b48932f09bb0586743392c9e62cb",
+  "contract_version": "3.0.0",
+  "contract_sha256": "55ddf99d64f2b5a0bc2db3949f0a7ed8e3ddb0b6a7679fbe71250b6e02ce6e49",
   "skeleton_version": "0.3.0",
   "contract": {
     "manifest": {
       "schema_id": "urn:spark:schema:spark-daemon-manifest:2",
       "manifest_schema": "spark-daemon-manifest/2",
-      "json_schema_sha256": "d3d2b478baff34c8c52f49a8034c36af46b3790a28b809d8ebb452d451ab58aa",
+      "json_schema_sha256": "7a0d1049d71b6c78f6448e575a48e826f64d6e83de14ff71ed1226034b04f81c",
       "max_bytes": 65536,
       "base_deny": [
         "~/spark-core/data",
@@ -572,7 +572,13 @@
       "unsettled": "sense() returned ctx.unsettled(reason): the cycle is abandoned before decide(), with no event, no DAEMON_ERROR and no new digest",
       "failed": "sense() or decide() raised, or returned invalid data: DAEMON_ERROR (repeats collapsed)",
       "blind_limit": "no accepted cycle for blind_limit_seconds (monotonic clock), whether from unsettled or failed cycles: DAEMON_ERROR category SENSE_BLIND with blind_ms, limit_ms, unsettled_cycles, failed_cycles, last_cause and last_cause_kind; then exit 78",
-      "watchdog": "pinged from the main loop throughout, including unsettled and failed cycles within the limit; the limit, not the watchdog, catches a daemon that sees nothing"
+      "watchdog": "pinged from the main loop throughout, including unsettled and failed cycles within the limit; the limit, not the watchdog, catches a daemon that sees nothing",
+      "across_restarts": "the blind clock survives restarts (PD-70): at start-up it begins at the latest evidence of an accepted cycle in the verified ledger (a daemon event, or the last_accepted_utc of a heartbeat or clean stop), measured on the wall clock; a fresh ledger starts at zero. A restart that inherits more than the limit gets one reacquisition cycle, then SENSE_BLIND without a fresh countdown. Neither an operator restart nor a clean stop resets it; only an accepted cycle does",
+      "heartbeat": "DAEMON_HEARTBEAT every blind_limit_seconds / 2: mode (observing or blind), last_accepted_utc (null before the first accepted cycle), blind_ms, and the accepted, unsettled and failed cycle counts since the previous heartbeat",
+      "blind_forester": {
+        "observe": "fail closed: SENSE_BLIND, exit 78, never restarted (the only class in this contract)",
+        "active_classes": "a pre-validated survival loop (PD-01.9) is not available in contract 3.x; it requires an Act-family class, the supervisor/worker split (PD-72) and pre-authorized survival actions"
+      }
     },
     "git": {
       "via": "ctx.git(repo, args, max_bytes=65536, index_copy=False); ctx.run(['git', ...]) is refused",
@@ -704,7 +710,8 @@
         "DAEMON_STOP",
         "DAEMON_ERROR",
         "DAEMON_ERROR_CLEARED",
-        "LEDGER_TAIL_QUARANTINED"
+        "LEDGER_TAIL_QUARANTINED",
+        "DAEMON_HEARTBEAT"
       ],
       "event_type_pattern": "^[A-Z][A-Z0-9_]{2,47}$",
       "output_dir_entries": [

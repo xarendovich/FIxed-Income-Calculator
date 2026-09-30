@@ -25,7 +25,8 @@ spark-daemon-pattern/
                             universal-contract alignment and U-1..U-7: PD-46..PD-68
   PD-01-DAEMON-CLASSES.md   r3.6 PD-01 reopened: daemon classes, consequence levels, safety invariants (open for expansion)
   PRIOR-ART-REVIEW.md       r3.7 review of robotics, industrial, flight, automotive, operations and AI-agent practice: A-1..A-12
-  INTEGRATION-REVIEW.md     r3.9 limits in conflict (HF-28..HF-32), DB-14 comment review, blind modes, integration plan: PD-69..PD-71
+  INTEGRATION-REVIEW.md     r3.9/r4.0 limits in conflict (HF-28..HF-32), DB-14 comment review, blind modes, integration plan,
+                            owner rulings (PD-01.9, PD-70), hardening review: PD-69..PD-74
   Makefile                  test | contract | check-contract | validate/precheck/battery-examples | evidence
   bin/spark-daemon          entry point; works under python3 -I -B (isolated, no bytecode)
   contract/                 generated, never hand-edited: daemon-contract.json, manifest.schema.json,
@@ -56,7 +57,7 @@ spark-daemon-pattern/
     git-watch/              refs, HEAD and worktree state via read-only ctx.git (bare-repo fixture)
   tests/                    170 self-tests and 7 fixture daemons, some deliberately bad
   evidence/                 r2 battery report and self-test output; evidence/r3/ holds the r3 runs;
-                            evidence/r3.8/ the start-up verification benchmark (U-6); evidence/r3.9/ the restart-loop reproduction (HF-32).
+                            evidence/r3.8/ the start-up verification benchmark (U-6); evidence/r3.9/ the restart-loop reproduction (HF-32); evidence/r4.0/ the same after the fix.
                             (r2 also listed evidence/ap/, which was not in the uploaded zip: HF-23)
 ```
 
@@ -153,7 +154,7 @@ The code may import only `bisect collections dataclasses enum functools hashlib 
 
 ### Lifecycle events the skeleton writes
 
-`DAEMON_START`, `DAEMON_STOP` (with CPU and peak memory), `DAEMON_ERROR`, `DAEMON_ERROR_CLEARED`, `LEDGER_TAIL_QUARANTINED`. A manifest may not declare these names. Every run's first record is `DAEMON_START`; a `LEDGER_TAIL_QUARANTINED` from that start's recovery follows it (r3.2, HF-26).
+`DAEMON_START`, `DAEMON_STOP` (with CPU and peak memory), `DAEMON_ERROR`, `DAEMON_ERROR_CLEARED`, `LEDGER_TAIL_QUARANTINED`, `DAEMON_HEARTBEAT` (r4.0, every `blind_limit_seconds` / 2). A manifest may not declare these names. Every run's first record is `DAEMON_START`; a `LEDGER_TAIL_QUARANTINED` from that start's recovery follows it (r3.2, HF-26).
 
 ### Blind period (r3.5)
 
@@ -164,7 +165,12 @@ A cycle is **accepted** when `sense()` returns a snapshot and its events are com
 
 The runtime keeps the monotonic time of the last accepted cycle, and start-up counts as one. While the gap is under the manifest's `blind_limit_seconds`, the daemon keeps pinging the watchdog and waits: patience through a long build is correct behaviour. Once the gap reaches the limit, it writes `DAEMON_ERROR` with category `SENSE_BLIND`, carrying `blind_ms`, `limit_ms`, `unsettled_cycles`, `failed_cycles`, `last_cause` and `last_cause_kind`. It then exits 78, and the unit never restarts it.
 
-Without the limit, a daemon that fails or waits every cycle keeps the watchdog happy over a ledger that records nothing. The limit is required and bounded (at most a day), so infinite patience cannot be written down. Set it above the longest legitimate unsettled period on the host, such as a long build or a large checkout, plus a margin. `git-watch` shows the idiom: it reads refs and the dirty count twice and reports `REPO_CHANGING` when they differ. Its manifest allows 7200 s.
+Without the limit, a daemon that fails or waits every cycle keeps the watchdog happy over a ledger that records nothing. The limit is required and bounded (at most a day), so infinite patience cannot be written down. Set it above the longest legitimate unsettled period on the host, such as a long build or a large checkout, plus a margin.
+
+**Across restarts (r4.0, PD-70):**
+- **The clock is not reset by a restart.** It starts at the latest evidence of an accepted cycle in the verified ledger, so a restart loop cannot hide blindness (HF-32).
+- **One reacquisition cycle.** A restart that inherits more than the limit gets one cycle: accepted, and the clock resets; not, and `SENSE_BLIND` follows at once.
+- **Heartbeat.** `DAEMON_HEARTBEAT` every `T`/2 records the mode, the last accepted cycle and the cycle counts, so a quiet, healthy daemon is distinguishable from a dead one. `git-watch` shows the idiom: it reads refs and the dirty count twice and reports `REPO_CHANGING` when they differ. Its manifest allows 7200 s.
 
 ### Exit codes
 
@@ -325,9 +331,12 @@ Recommendation: APPROVE. Decision: PENDING
 | r3.7 | 2026-09-29 | Claude | Prior-art review at the owner's request (`PRIOR-ART-REVIEW.md`), covering IEC 61784-3, NAMUR NE 107, ISA-18.2, PackML, IEC 62443, NASA F´, ASTM F3269, AUTOSAR, ISO 21448, ROS 2, Autoware, UL 4600, systemd, Erlang/OTP, SPIFFE, Fuchsia, CaMeL and Levels of Autonomy. The design is confirmed in nine places, and twelve amendments to PD-01 are proposed (A-1 to A-12, `PD-01-DAEMON-CLASSES.md` §9a). Corrected HF-28: the unit's own start limit (5 in 300 s) already stopped fast 78 exits after five restarts; the endless loop applied to `SENSE_BLIND`, whose restarts are too far apart to trip it. Severity lowered to Medium. No behaviour change. |
 | r3.8 | 2026-09-29 | Claude | Universal contract (`ADJUDICATION-PLUG-AND-PLAY.md` §9). It states what is in code and what is only recorded, places the recent pieces in the L0 to L4 stack (what a component claims about itself goes in its envelope; what Spark decides goes in Spark's records), and sets three rules: the invariants become a base conformance suite (U-1); nothing safety-related in L3 (U-2); escalation meaning is a contract and delivery a binding (U-3). Four further considerations: U-4 temporal honesty (unsettled gaps are folded silently into the next event's timestamp; S-8 proposed); U-5 stop and revocation, the inverse of activation; U-6 cumulative bounds (start-up verification measured at about 20,000 records/s, so git-watch's 120 s start timeout is exceeded at about 2.4 million records; `evidence/r3.8/`); U-7 evidence that expires and independence that must be shown (a watcher built on the same skeleton shares its defects). PD-64 to PD-68. No behaviour change. |
 | r3.9 | 2026-09-30 | Claude | Integration review (`INTEGRATION-REVIEW.md`). Recurring cause of recent defects: limits checked alone, never against each other (U-8, PD-69). Fixed HF-30 (introduced by r3.5: git-watch's double read made a worst-case cycle, 6 × 20 s, equal its 120 s watchdog; watchdog now 240 s) and HF-31 (stop timeout now outlasts one watchdog period). Reproduced and left open HF-32: every start resets the blind clock, so slow restart loops hide blindness indefinitely (PD-70: observation heartbeat plus blindness counted across restarts, which also tells quiet from dead). Reviewed the DB-14 comment: the check is right; the evidence is one small fixture and per-process, not cgroup-wide; the D-6 citation is out of scope (PD-71). Blind modes for critical consequence (PD-01.9, BM-1 to BM-7): declared in advance, run by the side that still works, reconnection is a new session. Integration plan in five phases. 197 of 197 self-tests; git-watch 18 of 18 battery checks. |
+| r4.0 | 2026-09-30 | Claude | Owner rulings recorded: PD-01.9 "Blind Forester" adopted as core pattern; PD-70 adopted. Built PD-70 (HF-32 fixed): blindness survives restarts (the clock starts at the latest ledger evidence of an accepted cycle), `DAEMON_HEARTBEAT` every `T`/2, one reacquisition cycle so a restart never locks a daemon out. The contract names the blind-forester slot (fail closed for observers; active survival loops need an Act class and the supervisor split). Hardening review adjudicated (`INTEGRATION-REVIEW.md` §7): environment sanitization and streaming with byte ceilings were already implemented (now pinned by a test); supervisor/worker split adopted as a precondition for active classes (PD-72); s6/tini not needed under systemd; WASI and WASM fuel deferred (PD-73, PD-74). Implementation conditions BF-1 to BF-6 proposed. Contract 3.0.0. 202 of 202 self-tests; 4 × 18 of 18 battery checks. |
 
 ## Decision log
 
 | Date | ID | Decision | By | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-09-30 | PD-01.9 | ADOPTED AS CORE PATTERN (the "Blind Forester" protocol) | Owner | Active daemons shift into a pre-validated survival loop instead of failing closed when stopping would drop a critical downstream payload. Implementation conditions BF-1 to BF-6 proposed, pending confirmation (`PD-01-DAEMON-CLASSES.md` §9b) |
+| 2026-09-30 | PD-70 | ADOPTED ("reversed and adopted") | Owner | Heartbeat every `T`/2 and blindness carried across restarts; built in r4.0 with one reacquisition cycle per restart (`INTEGRATION-REVIEW.md` §6) |
 | 2026-09-29 | PD-63 | CLOSED BY OWNER DIRECTIVE: blind period in force as implemented in r3.5 | Owner (directive); recorded by Claude | The owner asked for it ("consider this an ability within the daemon pattern ... implement this solution") and asked that it not remain pending. `T` is set in the manifest; this was the implementer's reading of "deployment configuration" and is reversible (`ADJUDICATION-SPARK-SOURCES.md` §4c). |

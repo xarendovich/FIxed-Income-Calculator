@@ -21,6 +21,7 @@ RESERVED_EVENT_TYPES = (
     "DAEMON_ERROR",
     "DAEMON_ERROR_CLEARED",
     "LEDGER_TAIL_QUARANTINED",
+    "DAEMON_HEARTBEAT",          # r4.0 (PD-70): observation heartbeat, every blind_limit_seconds / 2
 )
 
 # Fixed file names inside a daemon's output directory.

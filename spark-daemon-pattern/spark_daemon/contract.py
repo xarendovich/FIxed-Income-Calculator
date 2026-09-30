@@ -28,7 +28,7 @@ from . import proc, purity, render, unitgen
 from .canonical import MAX_SAFE_INT, canonical_bytes, sha256_hex
 
 CONTRACT_SCHEMA = "spark-daemon-contract/1"
-CONTRACT_VERSION = "2.0.0"
+CONTRACT_VERSION = "3.0.0"
 CANDIDATE_SCHEMA = "spark-daemon-candidate/1"
 VALIDATE_SCHEMA = "spark-daemon-validate/1"
 PRECHECK_SCHEMA = "spark-daemon-precheck/1"
@@ -283,6 +283,21 @@ def contract_body() -> dict:
                            "limit_ms, unsettled_cycles, failed_cycles, last_cause and last_cause_kind; then exit 78",
             "watchdog": "pinged from the main loop throughout, including unsettled and failed cycles within "
                         "the limit; the limit, not the watchdog, catches a daemon that sees nothing",
+            "across_restarts": "the blind clock survives restarts (PD-70): at start-up it begins at the latest "
+                               "evidence of an accepted cycle in the verified ledger (a daemon event, or the "
+                               "last_accepted_utc of a heartbeat or clean stop), measured on the wall clock; a "
+                               "fresh ledger starts at zero. A restart that inherits more than the limit gets one "
+                               "reacquisition cycle, then SENSE_BLIND without a fresh countdown. Neither an "
+                               "operator restart nor a clean stop resets it; only an accepted cycle does",
+            "heartbeat": "DAEMON_HEARTBEAT every blind_limit_seconds / 2: mode (observing or blind), "
+                         "last_accepted_utc (null before the first accepted cycle), blind_ms, and the accepted, "
+                         "unsettled and failed cycle counts since the previous heartbeat",
+            "blind_forester": {
+                "observe": "fail closed: SENSE_BLIND, exit 78, never restarted (the only class in this contract)",
+                "active_classes": "a pre-validated survival loop (PD-01.9) is not available in contract 3.x; it "
+                                  "requires an Act-family class, the supervisor/worker split (PD-72) and "
+                                  "pre-authorized survival actions",
+            },
         },
         "git": {
             "via": "ctx.git(repo, args, max_bytes=65536, index_copy=False); ctx.run(['git', ...]) is refused",

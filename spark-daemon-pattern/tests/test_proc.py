@@ -61,6 +61,35 @@ class ProcTests(unittest.TestCase):
         self.assertIn("+two", r.stdout)
         self.assertNotIn("\x1b[", r.stdout)
 
+    def test_inherited_git_selection_variables_cannot_redirect_git(self):
+        """r4.0 (hardening review, item 2): GIT_DIR, GIT_WORK_TREE and GIT_OBJECT_DIRECTORY in the
+        daemon's own environment must not redirect a call to a decoy repository. Every child starts
+        from SAFE_ENV (an allowlist), so nothing inherited reaches Git."""
+        env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1")
+        for name in ("real", "decoy"):
+            sh_git(self.tmp, "init", "-q", "-b", "main", name, env=env)
+            sh_git(os.path.join(self.tmp, name), "-c", "user.name=t", "-c", "user.email=t@t",
+                   "commit", "-q", "--allow-empty", "-m", f"{name} commit", env=env)
+        decoy = os.path.join(self.tmp, "decoy")
+        hostile = {"GIT_DIR": os.path.join(decoy, ".git"), "GIT_WORK_TREE": decoy,
+                   "GIT_OBJECT_DIRECTORY": os.path.join(decoy, ".git", "objects")}
+        # The variables really do redirect plain Git, so the test cannot pass vacuously.
+        plain = subprocess.run(["git", "-C", os.path.join(self.tmp, "real"), "log", "-1", "--format=%s"],
+                               capture_output=True, text=True, env=dict(env, **hostile))
+        self.assertEqual(plain.stdout.strip(), "decoy commit")
+        saved = {k: os.environ.get(k) for k in hostile}
+        os.environ.update(hostile)
+        try:
+            r = proc.git(os.path.join(self.tmp, "real"), ["log", "-1", "--format=%s"],
+                         executables=EXE, timeout=10, max_bytes=1000)
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        self.assertEqual(r.stdout.strip(), "real commit")
+
     def test_index_copy_leaves_the_real_index_untouched(self):
         """Script-board F4: porcelain `git diff` rewrites .git/index; the index copy does not."""
         repo = os.path.join(self.tmp, "repo")

@@ -1,0 +1,3 @@
+# evidence/r3.9/restart_loop_repro.py re-run after PD-70 (r4.0); compare evidence/r3.9/restart_loop_repro.txt
+restart loop: 4.0 s blind in total against a 1.5 s limit; DAEMON_START x4 (previous_run_ended_cleanly=[None, False, False, False]); SENSE_BLIND records: 3
+control, one uninterrupted run: exit 78

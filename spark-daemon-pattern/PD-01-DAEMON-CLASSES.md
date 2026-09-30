@@ -134,7 +134,7 @@ Recommendation: APPROVE the design direction; build when PD-01.5 is approached. 
 Recommendation: APPROVE the invariant; the script board sets the exit code. Decision: PENDING
 
 **PD-01.9. Critical consequence requires declared blind modes** (section 9b). Where a running process keeps a person safe, blindness is handled by a procedure declared and validated in advance, and executed by the side that still works. It is never handled by a stop, and never by improvisation. This is a precondition for ever accepting `critical` or unlocking 3b. It adds nothing for today's observers, whose declared blind mode is "stop and call a human".
-Recommendation: APPROVE as a precondition. Decision: PENDING
+Recommendation: APPROVE as a precondition. **Decision: ADOPTED AS CORE PATTERN by the owner, 2026-09-30, as the "Blind Forester" protocol** (section 9b). The implementation conditions BF-1 to BF-6 are recommendations that shape how the ruling is built; they are PENDING owner confirmation.
 
 ## 8. Open questions (for expansion)
 
@@ -178,7 +178,21 @@ Requirements, for any function whose failure could hurt someone:
 - **BM-6. Reconnection is a new session.** After a lost link, control resumes only after full re-authentication (S-5) and a reconciliation of what happened meanwhile. Outcomes of that period are reported as unknown until proven (LTC `UNKNOWN_AFTER_RESTART`).
 - **BM-7. Blind modes are drilled** on a schedule, in production conditions (U-7).
 
-**The boundary for Spark:** no process on the DGX may sit in the loop that keeps a person safe. Spark may observe that loop and advise it. The loop itself runs on an independent controller with its own sensors and declared blind modes. Spark never flies anything blind; it makes sure whatever flies has a declared way to fly blind.
+**The boundary for Spark** (*superseded in part on 2026-09-30 by the owner's adoption of the Blind Forester protocol, below; the far-side requirement BM-2 is kept as the last line of defence*): no process on the DGX may sit in the loop that keeps a person safe. Spark may observe that loop and advise it. The loop itself runs on an independent controller with its own sensors and declared blind modes. Spark never flies anything blind; it makes sure whatever flies has a declared way to fly blind.
+
+**The Blind Forester protocol (owner ruling of 2026-09-30: ADOPT AS CORE PATTERN).**
+
+An active daemon whose stopping would drop a critical downstream payload does not fail closed when it goes blind. It shifts into a pre-validated, degraded survival loop (last-known-safe outputs, holding station, a safe-descent sequence) and signals distress. Through PD-70's heartbeat, a restart resumes that loop instead of starting a fresh `T` countdown.
+
+For observers, the survival action is fail closed, which drops nothing and is built (contract 3.0.0).
+
+**Implementation conditions** (recommended; PENDING owner confirmation). Each follows from the owner's hardening review or from a recorded invariant.
+- **BF-1. The survival loop runs in the supervisor, never in the worker.** The owner's hardening review, item 1: a worker blinded by memory corruption or an infinite loop cannot reliably run its own survival protocol. Requires the AP-04 split (PD-72).
+- **BF-2. Survival is signalled; it is never passed off as normal operation.** Every output produced in survival mode is marked as such. Heartbeats carry `mode: blind`, and escalation starts at once. This follows S-1 and S-8.
+- **BF-3. Last-known-safe outputs have a declared validity window.** Holding a stale output indefinitely is itself a hazard, because the downstream acts on out-of-date data. When the window expires, the loop steps to the next level: degraded, then minimal-risk condition, one way only (BM-4).
+- **BF-4. Survival actions are pre-authorized, not improvised.** They are actions, so under the owner's principle (capability is not authority) they are approved at activation, bound to the manifest's digest, and drilled (BM-7).
+- **BF-5. The far side keeps its own procedure.** The supervisor still shares the DGX's kernel, power and disk. For anything at the critical consequence level, the downstream device keeps its own lost-link procedure (BM-2), so the Blind Forester is the first line of defence, not the last.
+- **BF-6. Leaving survival mode requires revalidation.** It takes accepted cycles in normal mode under a declared rule, and the exit is recorded. There is no silent return to normal (BM-4).
 
 ## 9. Expansion log
 
@@ -194,3 +208,4 @@ Add entries at the end; never rewrite earlier ones.
 | 2026-09-29 | Prior-art review | Owner, Claude | Robotics, industrial, flight, automotive, operations and AI-agent sources reviewed (`PRIOR-ART-REVIEW.md`); twelve amendments proposed (section 9a); HF-28 description corrected |
 | 2026-09-29 | Universal contract | Owner, Claude | Alignment with the L0 to L4 stack and rules U-1 to U-3; four further considerations (U-4 temporal honesty, adding S-8; U-5 stop and revocation; U-6 cumulative bounds, measured; U-7 assurance of the assurance), PD-64 to PD-68 in `ADJUDICATION-PLUG-AND-PLAY.md` section 9 |
 | 2026-09-30 | Blind modes | Owner, Claude | Life depending on a running process: blind is a declared mode, run by the side that still works (BM-1 to BM-7, section 9b, PD-01.9); limit-interaction findings and the integration plan in `INTEGRATION-REVIEW.md` |
+| 2026-09-30 | Blind Forester adopted | Owner, Claude | PD-01.9 adopted as core pattern (owner); implementation conditions BF-1 to BF-6 proposed (section 9b); PD-70 adopted and built (contract 3.0.0) |

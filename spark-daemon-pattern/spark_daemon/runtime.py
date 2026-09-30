@@ -30,6 +30,18 @@ a long build is correct. Past the limit it records DAEMON_ERROR SENSE_BLIND and 
 which the unit never restarts: a daemon that has seen nothing for that long needs a human,
 and a watchdog that keeps ticking over an empty ledger would hide it.
 
+Blindness survives restarts (r4.0, PD-70; HF-32). A per-process clock let any restart loop
+slower than the unit's start limit hide blindness forever. At start-up the runtime now finds, in
+the verified ledger, the latest evidence of an accepted cycle (a daemon event, or the
+last_accepted_utc a heartbeat or clean stop carried) and starts the blind clock that far back,
+measured on the wall clock across the restart. A fresh ledger starts at zero. A restart that
+inherits more than the limit gets exactly one reacquisition cycle: accepted, and the clock
+resets; not accepted, and SENSE_BLIND follows at once, without a fresh countdown. Neither an
+operator restart nor a clean stop resets the clock; only an accepted cycle does. Every
+blind_limit_seconds / 2 the runtime writes DAEMON_HEARTBEAT (mode observing or blind, the last
+accepted cycle, counts), so a quiet, healthy daemon is distinguishable from a dead one and its
+ledger can say "watching, nothing changed".
+
 Three additions (r2). Landlock (spark_daemon/landlock.py) is a fourth, kernel-enforced
 layer next to purity.py, the audit hook and the systemd unit; see that module's docstring
 for what it does and does not cover, in particular the gap it cannot close on its own (a
@@ -44,6 +56,7 @@ at about 0.2ms per idle call on this machine, negligible against any allowed pol
 """
 
 import collections
+import datetime
 import fcntl
 import gc
 import importlib.util
@@ -55,6 +68,7 @@ import sys
 import time
 
 from . import (DIGEST_NAME, EXIT_ALREADY_RUNNING, EXIT_LEDGER_CORRUPT, EXIT_OK, EXIT_POLICY,
+               RESERVED_EVENT_TYPES,
                EXIT_SENSE_BLIND, EXIT_UNCERTAIN_COMMIT, EXIT_USAGE, LOCK_NAME, TMP_DIR, TMP_PREFIX, VERSION)
 from . import guard, landlock, ledger, manifest as manifest_mod, notify as notify_mod, purity, render
 from .canonical import CanonicalError, sha256_hex, to_json_value
@@ -218,7 +232,8 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
         return EXIT_USAGE
 
     try:
-        scan, quarantine = ledger.recover(out, m.name, m.ledger.record_max_bytes)
+        evidence = _AcceptEvidence()
+        scan, quarantine = ledger.recover(out, m.name, m.ledger.record_max_bytes, on_record=evidence.observe)
     except ledger.LedgerCorrupt as e:
         log(str(e))
         return EXIT_LEDGER_CORRUPT
@@ -243,6 +258,9 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
             ended_cleanly = False if quarantine else None
         else:
             ended_cleanly = scan.last_event_type == "DAEMON_STOP"
+        # PD-70: how long this daemon has already been blind, carried across the restart.
+        since_utc = None if scan.records == 0 else (evidence.last_accepted_utc or evidence.first_start_utc)
+        inherited = _seconds_since(since_utc) if since_utc else 0.0
         recent.append(writer.append("DAEMON_START", {
             "skeleton_version": VERSION,
             "manifest_sha256": m.sha256,
@@ -252,6 +270,8 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
             "jitter_max_ms": int(jitter_bound * 1000),  # ledger values are integers; see canonical.py
             "landlock": landlock_info,
             "previous_run_ended_cleanly": ended_cleanly,
+            "last_accepted_utc": evidence.last_accepted_utc if scan.records else None,
+            "inherited_blind_ms": int(inherited * 1000),
             "test_overrides": overrides,
         }))
         if quarantine:
@@ -266,7 +286,11 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
         notify_mod.notify(f"STATUS=observing; ledger seq {writer.tail.seq}")
 
         prev, streak, cycles = None, None, 0
-        blind = _Blind(time.monotonic())
+        blind = _Blind(time.monotonic() - inherited)
+        blind.last_accepted_utc = evidence.last_accepted_utc if scan.records else None
+        heartbeat_every = blind_limit / 2
+        next_heartbeat = time.monotonic() + heartbeat_every
+        since_heartbeat = {"accepted": 0, "unsettled": 0, "failed": 0}
         violations_seen = guard.VIOLATIONS["count"]
         while not stop.requested:
             if max_cycles is not None and cycles >= max_cycles:
@@ -327,18 +351,33 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
             now = time.monotonic()
             if error or unsettled:
                 blind.miss(unsettled or error[0], "unsettled" if unsettled else "error")
+                since_heartbeat["unsettled" if unsettled else "failed"] += 1
             else:
                 blind.accept(now)
+                since_heartbeat["accepted"] += 1
+            # Checked after the cycle's outcome: a restart that inherited more than the limit
+            # gets this one cycle to reacquire (PD-70).
             if blind.seconds(now) >= blind_limit:
                 recent.append(writer.append("DAEMON_ERROR", {
                     "category": "SENSE_BLIND", "blind_ms": int(blind.seconds(now) * 1000),
                     "limit_ms": int(blind_limit * 1000), "unsettled_cycles": blind.unsettled,
                     "failed_cycles": blind.failed, "last_cause": blind.last_cause,
-                    "last_cause_kind": blind.last_kind}))
+                    "last_cause_kind": blind.last_kind, "inherited_ms": int(inherited * 1000),
+                    "last_accepted_utc": blind.last_accepted_utc}))
                 log(f"no accepted cycle for {int(blind.seconds(now))} s (limit {blind_limit:g} s, "
                     f"last cause {blind.last_cause}); stopping, needs a human")
                 notify_mod.notify("STOPPING=1")
                 return EXIT_SENSE_BLIND
+            if now >= next_heartbeat:
+                recent.append(writer.append("DAEMON_HEARTBEAT", {
+                    "mode": "blind" if (error or unsettled) else "observing",
+                    "last_accepted_utc": blind.last_accepted_utc,
+                    "blind_ms": int(blind.seconds(now) * 1000),
+                    "accepted_cycles": since_heartbeat["accepted"],
+                    "unsettled_cycles": since_heartbeat["unsettled"],
+                    "failed_cycles": since_heartbeat["failed"]}))
+                since_heartbeat = {"accepted": 0, "unsettled": 0, "failed": 0}
+                next_heartbeat = now + heartbeat_every
 
             gc.collect()
             notify_mod.notify("WATCHDOG=1")
@@ -356,7 +395,8 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
         writer.append("DAEMON_STOP", {
             "reason": stop.reason or "unknown", "cycles": cycles,
             "cpu_us_since_ready": _cpu_us() - cpu_at_start,
-            "max_rss_kb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss})
+            "max_rss_kb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+            "last_accepted_utc": blind.last_accepted_utc})
         notify_mod.notify("STOPPING=1")
         return EXIT_OK
     except ledger.UncertainCommit as e:
@@ -405,6 +445,7 @@ class _Blind:
     def accept(self, now):
         self.since, self.unsettled, self.failed = now, 0, 0
         self.last_cause = self.last_kind = None
+        self.last_accepted_utc = utc_now()
 
     def miss(self, cause, kind):
         if kind == "unsettled":
@@ -415,6 +456,36 @@ class _Blind:
 
     def seconds(self, now):
         return now - self.since
+
+
+class _AcceptEvidence:
+    """The latest evidence in the ledger that a cycle was accepted (r4.0, PD-70). Read in chain
+    order, never by comparing timestamps, so a wall-clock step cannot reorder it (U-4)."""
+
+    def __init__(self):
+        self.last_accepted_utc = None
+        self.first_start_utc = None
+
+    def observe(self, record):
+        event_type, payload = record["event_type"], record["payload"]
+        if event_type == "DAEMON_START":
+            if self.first_start_utc is None:
+                self.first_start_utc = record["timestamp_utc"]
+        elif event_type in ("DAEMON_HEARTBEAT", "DAEMON_STOP"):
+            value = payload.get("last_accepted_utc") if isinstance(payload, dict) else None
+            if isinstance(value, str):
+                self.last_accepted_utc = value
+        elif event_type not in RESERVED_EVENT_TYPES:
+            self.last_accepted_utc = record["timestamp_utc"]     # events come only from accepted cycles
+
+
+def _seconds_since(utc_text) -> float:
+    """Wall-clock seconds since a ledger timestamp; 0 if it cannot be read or lies in the future."""
+    try:
+        then = datetime.datetime.strptime(utc_text, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=datetime.timezone.utc)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, (datetime.datetime.now(datetime.timezone.utc) - then).total_seconds())
 
 
 def _cleared(writer, streak, ended_by):

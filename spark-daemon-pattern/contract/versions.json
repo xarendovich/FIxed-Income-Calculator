@@ -2,5 +2,6 @@
   "_comment": "Every published contract_version and its contract_sha256. A change to any enforced rule changes the sha; the self-tests fail until CONTRACT_VERSION is bumped (semver: MAJOR if an existing daemon could now fail) and a new line is added here. Never edit an existing line.",
   "1.0.0": "ef03a744961cfad81abced56b0c12b18b222ce3219d779e5f6f79a64319fb585",
   "1.0.1": "af8f169e290887ee8ffaad013365d5bfde5a39a9b2991bd40f0e142e9584d9d5",
-  "2.0.0": "cdf10247c7e4d9e63d071d882cfe978b0107b48932f09bb0586743392c9e62cb"
+  "2.0.0": "cdf10247c7e4d9e63d071d882cfe978b0107b48932f09bb0586743392c9e62cb",
+  "3.0.0": "55ddf99d64f2b5a0bc2db3949f0a7ed8e3ddb0b6a7679fbe71250b6e02ce6e49"
 }
