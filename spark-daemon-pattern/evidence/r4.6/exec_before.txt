@@ -1,0 +1,2 @@
+# r4.5 landlock.py (before the HF-36 fix), 2026-09-30T17:42:06Z, Linux 6.18.44-fc-v50: exit codes of execve under the enforced domain (0 = ran; 113 = EACCES)
+AssertionError: 0 != 113 : {'system': 0, 'output_dir': 0, 'declared_read': 0}

@@ -1,0 +1,4 @@
+# 2026-09-30T17:41:31Z Linux 6.18.44-fc-v50; r4.5 guard.Policy
+direct read of the denied path: path is denied
+read through the swapped directory: SECRET
+the same step with O_NOFOLLOW on each component: NotADirectoryError Not a directory

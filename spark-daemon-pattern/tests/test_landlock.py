@@ -193,6 +193,43 @@ class EnforcementTests(unittest.TestCase):
         result = _run_in_child(child)
         self.assertEqual(result["result"], "blocked")
 
+    def test_nothing_the_daemon_can_write_or_merely_reads_can_be_executed(self):
+        """r4.6 (HF-36): the domain granted EXECUTE on the output directory and on every declared
+        read path, so if the in-process layers were bypassed, a binary written into the output
+        directory, or dropped by someone else into a watched folder, could be run. Execute stays
+        only on the system and interpreter paths the allowlisted commands live in."""
+        home = self.home
+        true_bin = shutil.which("true", path="/usr/bin:/bin")
+        dropped = os.path.join(home, "reads", "dropped")
+        shutil.copyfile(true_bin, dropped)
+        os.chmod(dropped, 0o755)
+        # Control: the copy runs outside the domain, so a block below is Landlock, not noexec.
+        self.assertEqual(os.spawnv(os.P_WAIT, dropped, [dropped]), 0)
+
+        def run(path):
+            pid = os.fork()
+            if pid == 0:
+                try:
+                    os.execv(path, [path])
+                except OSError as e:
+                    os._exit(100 + (e.errno or 0) % 100)
+            return os.waitpid(pid, 0)[1] >> 8
+
+        def child():
+            policy = FakePolicy(output_dir=os.path.join(home, "out"),
+                                reads=(os.path.join(home, "reads"),), deny=())
+            landlock.apply_supervisor_domain(
+                policy, extra_read_paths=landlock.system_read_paths(), test_mode=False)
+            written = os.path.join(home, "out", "payload")
+            shutil.copyfile(true_bin, written)          # writing into the output dir is allowed
+            os.chmod(written, 0o755)
+            return {"system": run(true_bin), "output_dir": run(written), "declared_read": run(dropped)}
+
+        result = _run_in_child(child)
+        self.assertEqual(result["system"], 0, result)                          # allowlisted commands still run
+        self.assertEqual(result["output_dir"], 100 + errno.EACCES, result)
+        self.assertEqual(result["declared_read"], 100 + errno.EACCES, result)
+
     def test_output_directory_gets_every_right_the_abi_handles(self):
         home = self.home
 

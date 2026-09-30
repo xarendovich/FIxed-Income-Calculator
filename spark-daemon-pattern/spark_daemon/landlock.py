@@ -65,6 +65,12 @@ _SCOPE_SIGNAL = 1 << 1          # ABI 6+
 MIN_USABLE_ABI = 2
 
 READ = ACCESS_FS_EXECUTE | ACCESS_FS_READ_FILE | ACCESS_FS_READ_DIR
+# r4.6 (HF-36): read without execute. Only the system and interpreter paths keep EXECUTE, since
+# the allowlisted commands (resolved in /usr/bin or /bin) and the interpreter live there. The
+# daemon's own folder, its declared reads and its output directory never do: a binary the
+# daemon writes, or one someone else drops into a watched folder, cannot be run even if every
+# in-process layer is bypassed.
+READ_NO_EXEC = ACCESS_FS_READ_FILE | ACCESS_FS_READ_DIR
 # Every fs access right this module knows how to name, regardless of which ABI actually
 # grants each one; restrict_self() ANDs this down to what the running ABI handles.
 ALL_FS_ACCESS = (1 << 16) - 1
@@ -192,10 +198,11 @@ def gaps(policy) -> list:
 
 def apply_supervisor_domain(policy, *, extra_read_paths=(), test_mode: bool) -> dict:
     """The domain runtime.py applies once, before the audit hook and before daemon code is
-    imported: read and execute on the interpreter, the pattern's own code, the daemon's own
-    folder and every declared read path that exists; every access right on the output
-    directory (it already exists by this point - guard.prepare_output_dir ran earlier). No
-    TCP bind or connect from ABI 4; signal scoping from ABI 6 (PD-15/L2).
+    imported: read and execute on the system and interpreter paths (system_read_paths());
+    read without execute on the daemon's own folder and every declared read path that exists;
+    every access right except execute on the output directory (it already exists by this
+    point - guard.prepare_output_dir ran earlier). No TCP bind or connect from ABI 4; signal
+    scoping from ABI 6 (PD-15/L2). r4.6 (HF-36): execute was granted everywhere read was.
 
     Returns a dict for DAEMON_START.landlock: {abi, status, gaps}. status is "enforced" or
     "unavailable" - never "partially enforced": a failed rule or restrict_self call raises
@@ -213,14 +220,15 @@ def apply_supervisor_domain(policy, *, extra_read_paths=(), test_mode: bool) -> 
         return {"abi": max(abi, 0), "status": "unavailable", "gaps": []}
 
     rules = []
+    executable = set(system_read_paths())
     for path in extra_read_paths:
         if os.path.exists(path):
-            rules.append((path, READ))
+            rules.append((path, READ if path in executable else READ_NO_EXEC))
     for path in policy.reads:
         if os.path.exists(path):
-            rules.append((path, READ))
+            rules.append((path, READ_NO_EXEC))
     if os.path.isdir(policy.output_dir):
-        rules.append((policy.output_dir, ALL_FS_ACCESS))
+        rules.append((policy.output_dir, ALL_FS_ACCESS & ~ACCESS_FS_EXECUTE))
     # subprocess.Popen(stdin=DEVNULL, stderr=DEVNULL) (proc.py) opens /dev/null in this
     # process before it forks, so this grant is needed even though the daemon's own code
     # can never reach a device file (ctx has no such method, and the audit hook only
