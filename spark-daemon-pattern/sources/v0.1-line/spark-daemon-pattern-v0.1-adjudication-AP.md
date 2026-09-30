@@ -1,6 +1,6 @@
 # Daemon pattern v0.1 — adjudication of external proposals AP-01 to AP-04
 
-Draft, 2026-09-27; r3 documentation edits 2026-09-29 (battery review v0.1.2 §6.4 and §6.6; marked *r3*). *Imported 2026-09-30 from the v0.1 line (`sources/v0.1-line/`, see `RECONCILIATION-V01-LINE.md`); the r3 edits were the only difference. "PD-26" and "PD-28" in the r3 marks are that line's numbers, aliased here as PD-78 and PD-80, and "the README's registry" is that line's `registry/`, not yet in this repository.* Prepared by Claude as architecture reviewer. **These are recommendations, not rulings**: the human records each decision (Class C) in the README decision log. Nothing here changes v0.1 code; a v0.2 would implement whatever is approved.
+Draft, 2026-09-27; r3 documentation edits 2026-09-29 (battery review v0.1.2 §6.4 and §6.6; marked *r3*). Prepared by Claude as architecture reviewer. **These are recommendations, not rulings**: the human records each decision (Class C) in the README decision log. Nothing here changes v0.1 code; a v0.2 would implement whatever is approved.
 
 Subject: a submission from another LLM proposing four changes to the v0.1 package (kernel confinement, WASI instead of `purity.py`, an IETF SCITT / Sigstore ledger, out-of-process execution), framed by comparisons with Dapr, MCP and Erlang/OTP.
 

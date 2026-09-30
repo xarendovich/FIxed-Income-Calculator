@@ -1,0 +1,327 @@
+# Spark daemon pattern — v0.1 draft for review
+
+- **Status:** DRAFT FOR ADJUDICATION. Nothing here is approved, installed or running anywhere. The r2 changes below are implemented and self-tested (105 of 105 tests; 18 of 18 battery checks pass on this workspace's kernel, Landlock ABI 7) — that is evidence for the human's Class C ruling, not the ruling itself. Every PD below is still PENDING until recorded in the decision log.
+- **r3 (2026-09-29) is documentation and schema only.** It applies the battery review's r3 delta (`spark-battery-review-and-r3-delta-v0.1.md` v0.1.2, §6.1 to §6.5). **PD-24(a) is ADOPTED** (owner, 2026-09-29). PD-23 and PD-25 to PD-29 are implemented here as documentation and schema at the owner's direction; their rulings stay PENDING. **No battery or skeleton code changed**: `battery.py` still implements the r2 verdict and the r2 DB-14. Every rule r3 states about battery behaviour needs its normal conformance testing, once built, before any activation relies on it.
+- **Revision:** r3 (docs/schema), 2026-09-29, on r2 of 2026-09-27; drafted by Claude from Observer v0.3, the WBS 3.0 spec (r2), the Observer Improvement Proposal and the Spark Script Repository board. r2 adjudicates four external proposals (`ADJUDICATION-AP.md`, PD-15 to PD-20) plus two further ones submitted the same day (polling jitter and per-cycle GC forcing, PD-21 to PD-22), and implements the parts with a clear draft verdict: Landlock (AP-01), JCS key ordering (AP-03/J1), the 64 MB memory floor (IF-01/PD-20), polling jitter and GC forcing. The out-of-process supervisor/worker split (AP-04, S1-S7) stays a design only in `ADJUDICATION-AP.md` — none of it is built yet.
+- **Adjudicated by:**
+- **Adjudicated on:**
+
+A daemon built from this pattern has three parts. A **manifest** declares everything about its safety in a closed schema. A fixed **skeleton** supplies every safety mechanism, so the daemon's author writes only what to observe. A **conformance battery** runs the real daemon through its registry of checks (eighteen in r2) before anyone may activate it. v1 admits only daemons that observe and record; nothing in this package installs, enables or starts a service, and `spark-new daemon` is deliberately not built yet.
+
+## What is in the folder
+
+```text
+spark-daemon-pattern/
+  ADJUDICATION-AP.md        draft adjudication of external proposals AP-01..AP-04 (r2)
+  bin/spark-daemon          entry point; works under python3 -I -B (isolated, no bytecode)
+  spark_daemon/
+    manifest.py             the closed-schema manifest and its validator
+    runtime.py              the skeleton: start-up order, cycle loop, lifecycle events
+    ledger.py               append-only hash-chained ledger, recovery, torn-tail quarantine
+    canonical.py            canonical JSON and hashing
+    render.py               containment renderer and digest (WBS 3.0 ES5)
+    guard.py                path policy, output-directory checks, in-process audit hook
+    landlock.py             kernel-enforced confinement via the Landlock LSM (ctypes, r2, AP-01)
+    context.py              the read-only ctx object: the daemon's only I/O
+    proc.py                 hardened, bounded subprocess and Git helper
+    notify.py               systemd READY / WATCHDOG / STOPPING notifications
+    purity.py               static check of the daemon's code before import
+    unitgen.py              sandboxed systemd unit and human install plan (text only)
+    battery.py, probes.py   the conformance battery and its child-process probes
+    cli.py                  validate | unit | run | verify | battery | probe-landlock
+  registry/                 (r3, schema only; not yet read by battery.py)
+    battery-registry.json   the check registry, `spark-daemon-battery-registry/1` revision 1 (PD-26)
+    battery_registry.py     its validator, evolution rule, owed-environment rule (PD-28) and the reference
+                            verdict for the proposed PD-23 rule; test_battery_registry.py beside it
+  examples/meminfo-watch/   the reference daemon (GB10 unified-memory bands)
+  tests/                    105 skeleton self-tests and 7 fixture daemons, some deliberately bad
+  evidence/                 battery report and self-test output; evidence/ap/ holds the
+                            Landlock and JCS probes behind ADJUDICATION-AP.md
+```
+
+Requirements: Linux, Python 3.10 or later (tested on 3.10, 3.11 and 3.12.3, the DGX venv version), Git 2.31 or later. Optional: `strace` for the two fault-injection checks, `systemd-analyze` for the unit score; without them those checks report UNKNOWN, never PASS.
+
+## Try it
+
+```bash
+cd spark-daemon-pattern
+python3 -I -B bin/spark-daemon validate --manifest examples/meminfo-watch/manifest.json
+python3 -I -B bin/spark-daemon unit --manifest examples/meminfo-watch/manifest.json          # prints the unit
+python3 -I -B bin/spark-daemon unit --plan --manifest examples/meminfo-watch/manifest.json   # prints the install plan
+python3 -I -B bin/spark-daemon battery --manifest examples/meminfo-watch/manifest.json       # ~15 s, disposable workspace
+python3 -B -m unittest discover -s tests -t tests                                             # ~30 s
+```
+
+The battery works in a temporary folder with its own HOME, so it never touches your real output directory, `~/spark-core` or `~/spark-governance`.
+
+## 1. The manifest
+
+`manifest.json` sits beside `daemon.py`. Unknown keys are refused at every level, all values are bounded, and floats are refused.
+
+| Field | Rule | Why |
+| --- | --- | --- |
+| `manifest_schema` | `spark-daemon-manifest/1` | Versioned like every other Spark schema |
+| `name`, `version`, `purpose` | slug; `x.y.z`; one plain line, no `%` | `%` is a systemd specifier |
+| `daemon_class` | `observe` only; `act` is reserved and refused | Acting daemons need their own pattern and authority gate |
+| `trigger` | `{"kind": "poll", "interval_seconds": 5..86400}`; `inotify-wakeup` reserved | Observer proposal C2 is deferred |
+| `reads` | 1–32 absolute or `~/` paths; none inside a denied path | What `ctx` may read |
+| `commands` | up to 8 bare names; shells, interpreters, network, privilege and file-mutation tools always refused | What `ctx.run` may execute |
+| `output_dir` | the only writable place; never inside `~/spark-core`, `~/spark-governance` or a denied path; never overlapping `reads` | A daemon never observes its own output (v0.3 §6.7) |
+| `deny` | extra denied paths, added to a fixed base list that no manifest can shrink | Base: `~/spark-core/data`, `~/spark-governance/history`, `~/.ssh`, `~/.gnupg`, `~/.claude`, `~/.codex` |
+| `network` | `{"mode": "none"}`; `named` reserved | Outbound access needs relaxation R2 and a named destination |
+| `run_as` | `{"unit": "system", "user": ...}` (not root) or `{"unit": "user"}` | v0.3 §4 prefers a system unit with a dedicated user on Ubuntu 24.04 |
+| `resources` | `cpu_weight` 1–100, `cpu_budget_bp` (100 = 1%), `memory_max_mb` 64–2048, `tasks_max`, `io_class` | Budget checked by the battery; caps written into the unit |
+| `watchdog_seconds`, `step_timeout_seconds` | 10–3600; step timeout at most half the watchdog | Every command times out before systemd would kill the daemon |
+| `ledger` | `record_max_bytes`; 1–32 declared `event_types`, none of them reserved | Only declared events can be written |
+| `digest` | `enabled`, `max_bytes` | Size-bounded, with an explicit truncation marker |
+
+The manifest's canonical SHA-256 is recorded in every `DAEMON_START`, so each run names the exact configuration it ran under.
+
+## 2. The skeleton
+
+### What a daemon's author writes
+
+`daemon.py` defines three functions:
+
+- `sense(ctx)`: the only place with I/O, and only through `ctx`. Returns a snapshot of plain data.
+- `decide(prev, snapshot)`: pure. Returns a list of `(event_type, payload)`.
+- `digest(snapshot, recent)` (optional): pure. Returns `[(title, [(label, value), ...]), ...]`; the skeleton renders and contains it.
+
+`ctx` offers `read_text`, `list_dir`, `stat`, `disk_usage`, `run` (manifest commands only), `git` (hardened, optional private index copy) and `now_utc`. It has no method that writes, deletes, sends or executes anything else, so "observation never authorizes action" (v0.3 §6.2) holds by construction.
+
+The code may import only `bisect collections dataclasses enum functools hashlib heapq itertools json math operator re statistics string textwrap typing`, must not call `open`, `exec`, `eval`, `getattr` and similar, must not touch dunder names, must not use `global`, and must have no import-time side effects. `purity.py` checks this before import.
+
+### What the skeleton guarantees, and where each rule comes from
+
+| Guarantee | Module | Source |
+| --- | --- | --- |
+| Start-up order: validate, safe output dir, lock, purity, audit hook, import, recover, inventory, `DAEMON_START`, then `READY=1` | runtime | WBS 3.0 RC1; proposal C1 |
+| Append-only, hash-chained records; one `write()` then `fsync` per record; any failure exits 70, never retries `fsync` | ledger | WBS 3.0 LG2–LG4, FL1 |
+| Torn tail = every byte after the last newline, quarantined to a unique file, recorded; corrupt complete lines refuse start (65), nothing changed | ledger | WBS 3.0 RC2–RC4 |
+| Streaming verification, memory bounded by record size | ledger | WBS 3.0 VR6, RC7 |
+| Canonical JSON, pinned golden vector, no floats | canonical | WBS 3.0 CS1–CS9 |
+| Untrusted text contained: code blocks, quoted or prefixed lines, visible escapes such as `\u{202E}` | render | WBS 3.0 ES5; script-board F2 |
+| Output dir 0700, owned, not a symlink; foreign files reported, never touched | guard, runtime | WBS 3.0 FS1–FS2; proposal B3 |
+| Single instance by `flock`; SIGTERM ends with `DAEMON_STOP` | runtime | Observer WBS 3.1 |
+| Restart after an unclean stop is visible: `previous_run_ended_cleanly: false` | runtime | Observer WBS 3.2 (gap visibility) |
+| Tool versions, manifest hash and code hash in every `DAEMON_START` | runtime | Proposal B2; script contract SC9 |
+| Watchdog pings from the main loop only, so a hang starves them | runtime, notify | Proposal C1 |
+| Errors recorded as category and exception class only, never messages; repeats collapsed | runtime | WBS 3.0 FL4 |
+| Git with no user or system config, no pager, colour, fsmonitor or external diff; private index copy on request | proc | v0.3 §3.8; script-board F3, F4, F5 |
+| Bounded command output, process-group kill on timeout, stderr discarded | proc | v0.3 §3.8; WBS 3.0 FL4 |
+| Sandboxed system unit: exposure 0.4 ("SAFE") for the example under `systemd-analyze security --offline` | unitgen | v0.3 §4; dev-agents C11 |
+
+### Three layers, and what each cannot catch
+
+| Layer | Catches | Cannot catch |
+| --- | --- | --- |
+| Purity check (static) | Forbidden imports and calls, dunder tricks, side effects at import | Anything computed at run time; it is syntactic |
+| Audit hook (in process) | Writes outside the output dir, reads of denied paths, spawns, sockets, DNS, ctypes; counts violations even if the daemon swallows the exception, then fails closed (exit 78) | Code that bypasses Python (which is why ctypes is blocked); reads outside the manifest by the interpreter itself |
+| systemd sandbox | Everything the unit forbids, enforced by the kernel | Only effective once installed as a unit; user units on Ubuntu 24.04 need verification |
+
+### Lifecycle events the skeleton writes
+
+`DAEMON_START`, `DAEMON_STOP` (with CPU and peak memory), `DAEMON_ERROR`, `DAEMON_ERROR_CLEARED`, `LEDGER_TAIL_QUARANTINED`. A manifest may not declare these names.
+
+### Exit codes
+
+0 stopped cleanly · 2 bad manifest or impure code · 65 corrupt ledger (nothing changed) · 70 uncertain ledger commit · 73 already running · 78 unsafe output directory or policy violation.
+
+## 3. The batteries
+
+### Conformance battery (every daemon, before activation)
+
+| ID | Check | Passes when |
+| --- | --- | --- |
+| DB-01 | Manifest validates | Closed schema holds |
+| DB-02 | Purity | No findings |
+| DB-03 | Confinement | 5 cycles with the audit hook recording: zero events, no file outside the output dir changed |
+| DB-04 | Ledger integrity and provenance | Chain verifies; starts with `DAEMON_START`, ends with `DAEMON_STOP`; hashes of manifest and code match |
+| DB-05 | Crash and restart | 8 SIGKILLs at seeded random times, then a clean run: chain verifies; every restart records the unclean stop |
+| DB-06 | Torn tails | Garbage, and a complete record without its newline, are both quarantined byte for byte and recorded |
+| DB-07 | Corrupt ledger | One flipped byte mid-ledger: exit 65, bytes unchanged, nothing quarantined |
+| DB-08 | fsync failure | Injected `fsync` EIO (strace): exit 70; restart recovers; chain verifies |
+| DB-09 | Disk full | Injected `write` ENOSPC (strace): exit 70; restart recovers |
+| DB-10 | Digest containment | The daemon's own digest structure with 220 hostile values: structure unchanged, no raw control or bidi characters |
+| DB-11 | Notify protocol | `READY=1` only after `DAEMON_START` is committed; pings every cycle; `STOPPING=1` |
+| DB-12 | Single instance, SIGTERM | Second instance exits 73; SIGTERM gives `DAEMON_STOP` and exit 0 |
+| DB-13 | Audit hook | Ten forbidden operations blocked and counted for this manifest; output-dir write allowed |
+| DB-14 | Resource budget *(r2 meaning; retired in registry r1, replaced by DB-19)* | Self-measured CPU per cycle, projected to the real interval, and peak RSS within the manifest |
+| DB-15 | Unit hardening | Every required directive present; `systemd-analyze` exposure at or under 2.0 |
+| DB-16 | Read-only verification | Two verifications agree; ledger bytes and mtime unchanged |
+| DB-17 | Landlock enforces alone (r2) | With the audit hook in record-only mode, the kernel still blocks the forbidden write and the denied read; N/A below Landlock ABI 2 |
+| DB-18 | `DAEMON_START.landlock` is honest (r2) | Its `abi` and `gaps` match a fresh in-process check on this host, for a clean single-cycle run |
+| DB-19 | Resource budget, direct memory basis (r3; PD-24(a)) | CPU per cycle in microseconds, projected to the real interval, within `cpu_budget_bp`; and peak memory as the cgroup `memory.peak` of a fresh transient scope containing the daemon and every child it spawns, at or below `memory_max_mb`. Process RSS is reported under its own quantity ID as a proxy and never decides. **Not yet implemented in `battery.py`** |
+
+**Registry (r3, PD-26).** The table above is the human view; `registry/battery-registry.json` is the contract. Its `passes_when` text is this table's, without Markdown; the "(r2)" and "(r3 …)" marks are revision annotations, not part of a title. Each check has an immutable ID. A check whose meaning (`title` or `passes_when`) changes is retired with a reason and replaced by the next free ID, and retired IDs are never reused. That is why PD-24(a) retires DB-14 and adds DB-19 rather than editing DB-14 in place: the r2 evidence for DB-14 stays attached to the RSS meaning it measured. (If PD-26 is not adopted, DB-14 could instead be redefined in place and DB-19 dropped.) The registry's SHA-256 is the SPS-1 `contract_sha256` of every battery run. Per check it records:
+
+| ID | Requirements | Requires (host) | Detected by | Exercises (notes; inferred from this README, unconfirmed against `battery.py`) |
+| --- | --- | --- | --- | --- |
+| DB-01 | DB-01 | — | *(author)* | manifest schema (§1) |
+| DB-02 | DB-02 | — | `fixture:opener` | PD-05 |
+| DB-03 | DB-03 | — | *(author)* | v0.3 §6.2; FS1, FS2 in part |
+| DB-04 | DB-04 | — | *(author)* | LG2 to LG4; B2, SC9 in part |
+| DB-05 | DB-05 | — | *(author)* | Observer WBS 3.2 |
+| DB-06 | DB-06 | — | *(author)* | RC2 to RC4 |
+| DB-07 | DB-07 | — | *(author)* | RC2 to RC4 |
+| DB-08 | DB-08 | tool `strace` | *(author)* | LG2 to LG4, FL1 |
+| DB-09 | DB-09 | tool `strace` | *(author)* | LG2 to LG4, FL1 |
+| DB-10 | DB-10 | — | *(author)* | ES5 |
+| DB-11 | DB-11 | — | *(author)* | RC1; proposal C1 |
+| DB-12 | DB-12 | — | *(author)* | Observer WBS 3.1 |
+| DB-13 | DB-13 | — | *(author; `sneaky` may be this one)* | PD-06 |
+| DB-15 | DB-15 | tool `systemd-analyze` | *(author)* | v0.3 §4; dev-agents C11 |
+| DB-16 | DB-16 | — | *(author)* | verification is read-only |
+| DB-17 | DB-17 | Landlock ABI 2 (TCP part ABI 4) | *(author)* | AP-01 L5 |
+| DB-18 | DB-18 | Landlock ABI 2 *(assumed)* | *(author)* | AP-01 L4 |
+| DB-19 | DB-19 | cgroup-v2 transient scope | *(author)* | PD-12; PD-24(a); WBS 3.1 EC-1, EC-2 (same instrument) |
+
+Every check carries its own ID as its requirement, so it can enter the SPS-1 ledger today; clause IDs in the notes column become requirements only once confirmed against the code. Seventeen of the eighteen active checks have no recorded failing fixture or mutant yet; PD-26 recommends one for each.
+
+**Verdict (proposed r3 rule, PD-23 PENDING; `battery.py` still applies the r2 rule).** The verdict is `PASS` only if nothing fails, nothing is `UNKNOWN` or `ERROR`, no environment is owed, no reading is proxy-only against a limit, and the run is on the target platform. `N/A` is reserved for a check that is structurally inapplicable to the manifest. A host-caused inability to run a check (a missing tool, a Landlock ABI below the check's `Requires`, no cgroup-v2 scope) is an owed environment and makes the run `INCOMPLETE` (PD-28). A crashed check is `ERROR`, which is inconclusive and never a `FAIL` (battery review B-2(d)). A run with both a `FAIL` and anything inconclusive is `INCOMPLETE` (SPS-1 §6.1: 4 takes precedence over 3). `PASS` is necessary for activation and never sufficient; the human's Class C ruling remains. Each verdict names the hashes it binds: daemon tree, manifest, check registry, battery code and host fingerprint. A `PASS` does not survive a change to any of them. `registry/battery_registry.py` holds this rule as reference logic (`verdict`, `owed`, `binding`).
+
+*r2 rule, still implemented:* the verdict is PASS only if nothing fails and nothing is UNKNOWN; otherwise FAIL or INCOMPLETE. N/A does not block a PASS (DB-17 when Landlock is unavailable). A JSON report (`spark-daemon-battery/1`) records every check, the seed and the environment.
+
+### Battery report and the probe standard (r3; PD-25, PD-29)
+
+The battery is a `GUARD`-kind probe family under SPS-1. The native report stays as it is. An adapter (PD-25(a)) will project it into `spark-probe/1` records; it is not written yet, because the native report's keys are defined in `battery.py`, which the review could not read. The schemas are not merged.
+
+| SPS-1 field | Battery value |
+| --- | --- |
+| `probe_kind` | `GUARD`, with `gates_activation` true and `target_arch` set to the activation host's (SPS-1 v0.3) |
+| `wbs_id` | the daemon's WBS item |
+| `probe_id` | the battery run identifier (SLUG grammar); `DUPLICATE_RUN` keys on it |
+| `review_ref` | the review or adjudication the run belongs to, never the run itself |
+| `subject_sha256` / `parent_subject_sha256` | the daemon tree hash (code plus manifest, PS-09) / the previous tree, so a fix links to what it fixed |
+| `contract_sha256` | the registry hash (`battery_registry.registry_sha256`) |
+| `probe_sha256` | the hash of `battery.py` and `probes.py` |
+| Cases | one `GUARD` case per active check; `DB-05` becomes `db_05`; requirements from the registry |
+| `owed_environments` | one per entry of `battery_registry.owed(...)`, one per missing tool, one when off target |
+| `run_at_s` | on every run, so supersession follows time (3.1 handoff §10D D-1) |
+| Quantities | `peak-bytes` (`DIRECT`, cgroup scope); `peak-rss-kib` (proxy, under its own quantity ID so it never supersedes the direct reading); `cpu-us-per-cycle` (unit `US`, SPS-1 v0.3); `landlock-abi` (`COUNT`) |
+| Completeness / exit | SPS-1 v0.3 makes an activation-gating run `INCOMPLETE` for an owed environment, an off-target run or a proxy-undecided limit, matching the proposed verdict |
+
+**Exit codes of the `battery` command (PD-29, proposed):** 0 `PASS`, 3 `FAIL`, 4 `INCOMPLETE`; 4 takes precedence over 3. They are a probe-tool convention shared with SPS-1's probes, not part of a daemon exit taxonomy: the daemon codes in §2 stay the daemon's own (3.1 handoff D-6: no shared daemon exit taxonomy without a demonstrated multi-daemon need). r2 does not document the command's codes; this is the proposal.
+
+**Not yet available:** a cross-daemon view (the same check failing for several daemons points at the skeleton). It needs a small reader addition and waits until two daemons have battery history (PD-25(b), DEFER).
+
+### Skeleton self-tests (the pattern itself)
+
+105 tests: canonical form, golden vector and RFC 8785 (JCS) key-order vectors (9), manifest refusals (15), ledger corruption categories, torn tails, uncertain commits and bounded memory (16), rendering including a 500-trial property test (10), output-dir checks and the audit hook in child processes (8), subprocess bounds and the F4/F5 Git regressions (5), end-to-end runtime behaviour including a watchdog-starvation test, polling jitter and Landlock's start-up refusal/PD-15 (18), Landlock enforcement itself under `os.fork()` isolation, real kernel rules for read, write, TCP and worker-style nested domains (12), and unit generation, purity, the battery against good and bad daemons, the GC-forcing structural guard, and a source-hygiene check for hidden characters (12).
+
+## Evidence from this build (2026-09-27)
+
+Environment: x86_64 Ubuntu 24.04.4 (workspace kernel 6.18.44), Python 3.12.3, Git 2.43.0, systemd 255, strace 6.8, run as an ordinary user, **Landlock ABI 7**. **Not yet run on the DGX Spark (aarch64)** — that is the first step of review. The Landlock ABI there depends on the DGX OS release (r3, PD-28; the mapping is inferred from the kernel ladder, not an NVIDIA statement; confirm on the box with `python3 evidence/ap/landlock_probe.py`):
+
+| DGX OS | Kernel | Landlock ABI (inferred) |
+| --- | --- | --- |
+| 7.2.3 | 6.11 | 5 |
+| 7.3.1 | 6.14 | 6 |
+| 7.4.0, 7.5.0 | 6.17 | 7 |
+| 7.6.0 (2026-09-14) | 7.0 | 8 |
+
+Signal scoping (a worker that cannot signal its supervisor, AP-04) needs ABI 6, so it is absent on 7.2.3.
+
+**Reading this evidence under r3.** PD-24(a) is adopted: the r2 result for `meminfo-watch` is a PASS of DB-14's *r2* meaning (RSS). Under the registry, the budget check is now DB-19, which needs a direct cgroup reading from a fresh scope; until the battery takes that reading, the same run reads `INCOMPLETE` at DB-19, and on this workspace (no systemd user manager, cgroup-v1 memory controller) it cannot be taken at all. That is the rule working, not a regression.
+
+- Self-tests: 105 of 105 pass on Python 3.10, 3.11 and 3.12.3, with real Landlock enforcement active for the whole run (not a stub) — including the SIGKILL-restart and strace fault-injection checks, which continued to work correctly under a live kernel-level confinement domain.
+- Battery on `meminfo-watch`: PASS, 18 of 18, including DB-17 (Landlock alone blocks the forbidden write and the denied read with the audit hook in record-only mode) and DB-18 (`DAEMON_START.landlock` matches a fresh in-process ABI/gaps check). About 4.5 ms (4,500 µs) CPU per cycle at the 200 ms test interval (well under the 1% budget projected to the real 30 s interval); peak RSS about 19-20 MiB against the new 64 MiB floor; unit exposure 0.4.
+- Battery on the `opener` fixture (calls `open()`): FAIL at DB-02 and every runtime check, as intended.
+- Battery on the `sneaky` fixture (reads a denied path through `ctx` and swallows the error): FAIL; the daemon stops itself with exit 78 on its first cycle, as intended.
+- `DAEMON_START` now also carries `jitter_max_ms` (the ± bound on the poll sleep, PD-21) and `landlock` (`{abi, status, gaps}`, PD-15/L4), both disabled/zeroed deterministically in test mode.
+
+## Decisions for adjudication
+
+Each ends with a recommendation and a decision line, as in the WBS 3.0 spec. Record rulings in the decision log below.
+
+**PD-01. Observe-only in v1.** `daemon_class: act` is reserved and refused.
+Recommendation: APPROVE. Decision: PENDING
+
+**PD-02. Ledger format is provisional.** It follows the WBS 3.0 r2 recommendations (seq from 1, 64-zero genesis, `ensure_ascii` false, microsecond `Z` timestamps, one write and fsync per record, no checkpoint file as in K1). When the Observer's own writer exists, `ledger.py` should be replaced by it so there is one implementation.
+Recommendation: APPROVE as provisional. Decision: PENDING
+
+**PD-03. One ledger per daemon, and no daemon writes inside `~/spark-governance`.** The Observer itself, if later rebuilt on this pattern, would need an explicit exception.
+Recommendation: APPROVE. Decision: PENDING
+
+**PD-04. The base deny list** (six paths, never removable by a manifest).
+Recommendation: APPROVE; add paths as needs appear. Decision: PENDING
+
+**PD-05. Daemon code rules**: the import allowlist, I/O only through `ctx`, no floats.
+Recommendation: APPROVE. Relaxation R1 on the script board would widen the import list. Decision: PENDING
+
+**PD-06. Fail closed on any policy violation** (exit 78), even when the daemon's own code caught the exception.
+Recommendation: APPROVE. Decision: PENDING
+
+**PD-07. Errors carry category and exception class only**, never the message; identical consecutive errors collapse into one `DAEMON_ERROR` plus a `DAEMON_ERROR_CLEARED` with a count.
+Recommendation: APPROVE. Decision: PENDING
+
+**PD-08. `~` expands through `SPARK_DAEMON_HOME`**, set by the unit to the generating user's home, so a dedicated system user resolves the same paths. Granting that user read access is a per-path install decision.
+Recommendation: APPROVE. Decision: PENDING
+
+**PD-09. System unit with a dedicated user is the default**; exposure threshold 2.0.
+Recommendation: APPROVE. Decision: PENDING
+
+**PD-10. Test knobs** (`SPARK_DAEMON_TEST`, a shorter interval, audit record mode) work only in test mode and are recorded in `DAEMON_START.test_overrides`. The alternative is a separate test entry point.
+Recommendation: APPROVE. The runtime already refuses test mode when systemd started it (`INVOCATION_ID` is set). Decision: PENDING
+
+**PD-11. Battery verdicts**: INCOMPLETE whenever any check is UNKNOWN; only PASS allows activation.
+Recommendation: APPROVE. Decision: PENDING. *r3:* PD-23 proposes rewording this to "PASS is necessary, never sufficient", with owed environments, off-target runs and proxy-only readings blocking; see §3.
+
+**PD-12. Budget method**: the daemon's self-measured CPU per cycle, projected to its real interval, plus peak RSS, against the manifest (default 1% and 64 MiB, matching Observer proposal A2).
+Recommendation: APPROVE; confirm on the DGX under inference load. Decision: PENDING. *r3:* the memory half is settled by PD-24(a) (ADOPTED): a direct cgroup reading from a fresh scope, RSS as a labelled proxy only. CPU is reported in microseconds. PD-12's CPU half and its defaults remain for ruling.
+
+**PD-13. `meminfo-watch` band thresholds** (20% and 10% of MemTotal available) are placeholders.
+Recommendation: DEFER to the Class C health-rules ruling. Decision: PENDING
+
+**PD-14. Where the pattern lives**: `~/spark-tools` or `~/spark-governance/tools`, and where installed daemons live (for example `/opt`, root-owned and read-only).
+Recommendation: decide together with the script board's Home question. Decision: PENDING
+
+**PD-15 to PD-20** come from the adjudication of four external proposals and are set out with their evidence in `ADJUDICATION-AP.md`: Landlock availability policy (PD-15), denied paths inside granted reads (PD-16), the RFC 8785 alignment method (PD-17), the scope of the supervisor/worker split (PD-18), SCITT export (PD-19) and the memory floor (PD-20). The proposal-level verdicts (AP-01 to AP-04) are recorded in the decision log like the PDs.
+
+**PD-21. Polling jitter** ("thundering herd" defence, submitted the same day as AP-01..AP-04). Each poll sleep gets `± min(5% of interval, 30 s)` of uniform random offset, so many daemons on one host wake at different moments; the watchdog pings on its own fixed cadence regardless, so jitter cannot starve it. Disabled deterministically in test mode; recorded as `jitter_max_ms` in `DAEMON_START`.
+Recommendation: APPROVE. Decision: PENDING
+
+**PD-22. Per-cycle `gc.collect()` forcing** (submitted the same day). Called once per cycle, after the daemon's own step and before the watchdog ping, never inside the sleep loop. CPython's refcounting already frees ordinary garbage immediately; what `gc.collect()` adds is collecting reference cycles and letting arenas release back to the OS between cycles, which matters more on a host running many daemons that share the same memory budget than it does for any one daemon's own RSS. Measured cost: about 0.2-0.25 ms per call, negligible against the budget.
+Recommendation: APPROVE. Decision: PENDING
+
+**PD-23 to PD-29** come from the battery review (`spark-battery-review-and-r3-delta-v0.1.md` v0.1.2 §7), where each is set out with its evidence:
+
+- **PD-23. Battery verdict semantics** (PASS necessary, never sufficient; host-caused N/A owed; verdict bound to five hashes; activation needs a PASS on target). Recommendation: APPROVE. Decision: PENDING. Implemented as documentation and reference logic in r3 (§3).
+- **PD-24. DB-14's memory basis.** **Decision: ADOPTED, option (a), owner, 2026-09-29.** A process-RSS reading is a proxy; activation requires a direct cgroup reading from a fresh scope, so RSS-only runs are `INCOMPLETE`. The proxy label is provisional until WBS 3.1 Phase 2 tests the RSS reading's direction against the cgroup peak (3.1 handoff §10D D-2). Recorded in the registry as DB-19. `battery.py` does not yet take the reading; building it and passing its conformance tests comes before any activation relies on DB-19.
+- **PD-25. Report convergence**: (a) adapter plus mapping table, no schema merge; (b) cross-lineage reader view later. Recommendation: APPROVE (a), DEFER (b). Decision: PENDING. The mapping table is in §3; the adapter waits for the native report's keys.
+- **PD-26. Registry rules** (immutable IDs, `Requires`, `Detected by`, at least one requirement ID, a demonstrated failing case per check, registry hash as `contract_sha256`). Recommendation: APPROVE. Decision: PENDING. Implemented as schema in r3 (`registry/`).
+- **PD-27. The template and its instances** (daemon battery = instance A; memory-plugin instance B deferred; Titans-class systems are not an instance). Recommendation: APPROVE the template, DEFER instance B. Decision: PENDING. Documentation only.
+- **PD-28. Landlock ABI as a host variable** (inferred ABI table; `Requires` per check; unavailable required feature = owed environment). Recommendation: APPROVE. Decision: PENDING. Implemented in the evidence table and the registry.
+- **PD-29. Exit codes of the `battery` command** (0 PASS, 3 FAIL, 4 INCOMPLETE; a probe-tool convention, D-6). Recommendation: APPROVE. Decision: PENDING. Documented in §3.
+
+**A correction, for the record.** A follow-up submission argued for raising `memory_max_mb`'s floor to 32 MB, citing "a production constant `MAX_LEDGER_RECORD_BYTES` of 4 MiB" as part of its math. No such constant exists in this project at 4 MiB: `ledger.record_max_bytes`'s schema ceiling is 1,048,576 bytes (1 MiB), and `wbs-3.0-a2-secondary-review.md` records that figure as explicitly left open for the Observer track, never frozen, because "G0/G0.11 could not derive a finite bound." The floor recommendation here (64 MB, PD-20) stands on its own measurements instead: combined supervisor+worker RSS runs 25-35 MB depending on accounting method (`Pss`/`Private_Dirty` vs. a naive sum), which a 32 MB floor would not clear once AP-04 lands. 64 MB also needs no fixture changes, since every existing manifest already uses it.
+
+## Known limits
+
+- The audit hook is not a sandbox, and the purity check is syntactic. The systemd unit is the security boundary.
+- The hook does not enforce the read list for the interpreter itself; `ctx` enforces it for daemon code, and the unit's `ProtectSystem`, `ProtectHome` and `InaccessiblePaths` cover the process.
+- Nothing has run under systemd for real yet: the watchdog is tested with a stand-in notify socket and the unit is scored offline.
+- User units on Ubuntu 24.04 are generated with a warning; their sandboxing is unverified.
+- DB-05's random kills rarely land mid-write; DB-06 covers torn tails deterministically.
+- The CPU projection leaves out start-up cost and is measured with a 200 ms test interval.
+- The hostile corpus is not exhaustive; the property tests are seeded and reproducible.
+- IF-01 (found in r2, now fixed in code): `resources.memory_max_mb`'s floor is 64 (was 16, below the runtime's own measured peak of about 19 MB); see PD-20 and the correction above.
+- Canonical JSON equals RFC 8785 (JCS): key ordering now follows UTF-16 code units (J1), matching JCS for every value this schema accepts (no floats). The golden hash is unchanged.
+- AP-04 (the out-of-process supervisor/worker split) is design-only. `ADJUDICATION-AP.md` §S1-S7 specifies it; none of it is implemented, so the benefits it describes (least privilege per process, supervised worker restarts, a worker that cannot write the ledger at all) do not yet apply to this build.
+- Landlock (AP-01) is applied but has the gaps `landlock.py` and `ADJUDICATION-AP.md` document: a denied path nested inside a granted read is not covered by Landlock alone (the audit hook and `InaccessiblePaths` still are); `stat()` of a denied path still succeeds; no ABI up to 9 covers UDP (the kernel facts note lists ABIs 10 to 11 as adding UDP controls and a `NO_NEW_PRIVS` flag; kernel versions unconfirmed).
+- r3 changed documents and added a schema only. The proposed verdict rule, DB-19's direct memory reading and the `battery` exit codes are not in `battery.py` yet; each needs building and its own conformance testing before an activation relies on it.
+
+## Revision history
+
+| Revision | Date | By | Change |
+| --- | --- | --- | --- |
+| r1 | 2026-09-27 | Claude | First draft: manifest, skeleton, conformance battery, self-tests, reference daemon |
+| r2 | 2026-09-27 | Claude | Draft adjudication of external proposals AP-01 to AP-04 with Landlock and JCS evidence; PD-15 to PD-20; IF-01 noted. No code change |
+| r2 (implemented) | 2026-09-27 | Claude | Implemented and self-tested the parts of r2 with a clear draft verdict: `landlock.py` (AP-01, wired into start-up before the audit hook, DB-17/DB-18 added), JCS key ordering (AP-03/J1), the 64 MB memory floor (IF-01/PD-20). Adjudicated and implemented two further same-day proposals: polling jitter (PD-21) and per-cycle GC forcing (PD-22), and corrected a fabricated "4 MiB ledger constant" claim in one submission's math (see PD-20's note). AP-04 (S1-S7) remains design-only. 105 of 105 self-tests and 18 of 18 battery checks pass under real Landlock enforcement (ABI 7). Still nothing here is a Class C ruling — every PD stays PENDING until the human records one. |
+| r3 (docs/schema) | 2026-09-29 | Claude | Applied the battery review's r3 delta (§6.1 to §6.5): check registry with `Requires`, `Detected by` and requirement IDs (`registry/`, schema revision 1, validator and tests); DB-14 retired for DB-19 under PD-26 because PD-24(a) changed its memory basis; proposed PD-23 verdict text beside the r2 rule, which remains implemented; SPS-1 mapping and `battery` exit codes (PD-25, PD-29); inferred Landlock ABI table and UDP wording (PD-28); CPU in microseconds. Recorded PD-24(a) as ADOPTED by the owner. PD-23 and PD-25 to PD-29 stay PENDING. No code in `spark_daemon/` changed |
+
+## Decision log
+
+| Date | ID | Decision | By | Notes |
+| --- | --- | --- | --- | --- |
+| 2026-09-29 | PD-24 | ADOPT (a): memory at the budget check needs a direct cgroup reading from a fresh scope; process RSS is a proxy and RSS-only runs are `INCOMPLETE` | Owner | The battery review's condition (3.1 EC-1 and EC-2 ruled) was met the same day. Proxy label provisional per 3.1 handoff §10D D-2. Registry: DB-14 retired, DB-19 added. Not yet implemented in `battery.py` |

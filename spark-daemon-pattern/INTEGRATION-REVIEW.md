@@ -75,6 +75,7 @@ What "integrated" means for the recorded work, in dependency order. Each phase s
 | **0b (done, r4.0)** | PD-70: heartbeat and blindness across restarts (HF-32 fixed); environment redirection pinned by a test | Contract 3.0.0 | — |
 | **1 (small, no contract change)** | A-2 minimal: `OnFailure=` notifier. U-7: a separate, diverse staleness checker that does not import `spark_daemon`; until PD-70 lands it reads the digest's modification time, not the ledger's. The digest is rewritten after every accepted cycle, so this covers only daemons with a digest, and a failed digest render also shows as stale. U-8: DB-15 prints each daemon's timing and bounds budget | None | Owner's go-ahead |
 | **2 (one batched breaking change, contract 3.0.0)** | PD-70: observation heartbeat plus blindness counted across restarts (fixes HF-32 and T-6). PD-38: per-cycle sense budget (WBS 3.1 §8). U-4: gap record. P3-2 and PD-01.3: `SENSE_DEGRADED`, recovered, `spark-escalation/1`. PD-37: lifecycle and signals. PD-32: WBS 3.0 r3/r4 recovery conformance. PD-35, PD-39, PD-48, PD-49: exit reasons, vocabulary, identity, digest names. PD-01.2: consequence field. PD-71: DB-14 worst-case evidence | One major version, so that authors migrate once | Rulings on the listed PDs |
+| **2 (additions, r4.1)** | PD-76: DB-19 direct memory reading, with a decision on how CI treats `INCOMPLETE` where the reading cannot be taken. PD-75 and PD-81: verdict rule and battery exit codes (conflict C-1), with PD-35. PD-78: registry, importing and reconciling the v0.1 line's `registry/`. An independent ledger verifier (B-6 with U-7) | Battery report and exit codes | PD-75, PD-78, PD-81 rulings; the moved `registry/` |
 | **3 (the activation register)** | PD-40 register; U-5 revocation and stop semantics; A-3 recorded risk assessment; U-7 evidence validity periods; cross-manifest checks (one daemon reading another's output) | Register format | Phase 2 |
 | **4 (the connector gate)** | PD-01.7 gate with A-1 black-channel suite and A-11 security levels; then Sentinel paging, A-2 off-host heartbeat with PD-58 anchoring, P3-3 shelving and router | Action-plane contract | PD-42 egress preconditions |
 | **5 (kernel v2)** | Advise and Act unlocks (PD-01.4 to PD-01.6); critical consequence with declared blind modes (PD-01.9) | Kernel v2 | Certification path |
@@ -94,7 +95,7 @@ Recommendation: APPROVE. Decision: PENDING
 Recommendation: APPROVE; build in phase 2. **Decision: ADOPTED by the owner, 2026-09-30** ("reversed and adopted"). Implemented in r4.0; see section 6.
 
 **PD-71. DB-14 becomes worst-case evidence** (section 2): a named worst-case fixture per observation type, a scaling series deriving `N_max`, measurement of the cgroup total, and headroom.
-Recommendation: APPROVE; build in phase 2. Decision: PENDING
+Recommendation: APPROVE; build in phase 2. Decision: PENDING. *r4.1:* the memory-basis part is **superseded by PD-76** (the v0.1 line's PD-24(a), ADOPTED by the owner on 2026-09-29, which reached the same conclusion first; `RECONCILIATION-V01-LINE.md` §3). The worst-case fixture and `N_max` scaling part remains PENDING.
 
 ## 6. Owner rulings of 2026-09-30, and what was built
 
