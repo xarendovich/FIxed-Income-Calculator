@@ -24,6 +24,8 @@ spark-daemon-pattern/
   ADJUDICATION-PLUG-AND-PLAY.md  r3.3-r3.8 plug-and-play stack, framework/services boundary, kernel v2 agenda,
                             universal-contract alignment and U-1..U-7: PD-46..PD-68
   PD-01-DAEMON-CLASSES.md   r3.6 PD-01 reopened: daemon classes, consequence levels, safety invariants (open for expansion)
+  REVIEW-PACKAGE-COMBINED.md r4.4 the handoff and the decision brief in one document, led by a reviewer focus:
+                            what each decision has built and still needs, and new seams N-1..N-14
   DECISION-BRIEF.md         r4.4 handoff: the settled rulings revisited (keep all; one amendment or clarification each),
                             and every open choice with options, pros, cons and a recommendation
   HANDOFF-REVIEW-PACKAGE.md r4.3 self-contained handoff for independent reviewers: packages A (LTC), B (Break Glass),
@@ -258,7 +260,7 @@ Same workspace (x86_64, kernel 6.18.44, Landlock ABI 7, systemd 255, strace 6.8,
 
 Each ends with a recommendation and a decision line, as in the WBS 3.0 spec. Record rulings in the decision log below. **PD-32 to PD-42 (r3.1: conformance to WBS 3.0 r3, digest semantics, convergence on the Observer's writer, one exit-code table, lifecycle rules, KECC vocabulary, digest-bound activation) are in `ADJUDICATION-SPARK-SOURCES.md` section 7.** **PD-23 to PD-31 (r3: the contract, versioning, Git `safe.directory`, the candidate envelope, evidence lanes, DB-04's zero-error rule, contract 1.0.0's rule set, the unit's Landlock syscalls, and the kernel-v2 authoring boundary) are set out in `DAEMON-CONTRACT.md` section 10.**
 
-**PD-82 to PD-86 (r4.3: bind to the Local Transport Contract at declared edges rather than embed it; truncation as a typed failure in `ctx`; the LTC binding vocabulary for the activation register; declared pacing; retry bounds that hold over time) are in `LTC-INTEGRATION-REVIEW.md` section 7.** **A self-contained handoff for independent reviewers is `HANDOFF-REVIEW-PACKAGE.md`.** **The settled rulings revisited, and every open choice with its options, pros and cons, are in `DECISION-BRIEF.md` (r4.4).**
+**PD-82 to PD-86 (r4.3: bind to the Local Transport Contract at declared edges rather than embed it; truncation as a typed failure in `ctx`; the LTC binding vocabulary for the activation register; declared pacing; retry bounds that hold over time) are in `LTC-INTEGRATION-REVIEW.md` section 7.** **A self-contained handoff for independent reviewers is `HANDOFF-REVIEW-PACKAGE.md`.** **The settled rulings revisited, and every open choice with its options, pros and cons, are in `DECISION-BRIEF.md` (r4.4).** **Both, in one document, with each decision's implementation status and the new seams it creates: `REVIEW-PACKAGE-COMBINED.md`.**
 
 **PD-01. Observe-only in v1.** `daemon_class: act` is reserved and refused.
 REOPENED 2026-09-29, open for expansion: see `PD-01-DAEMON-CLASSES.md`. It covers a capability ladder (three families, two levels each), consequence levels, cross-class safety invariants including authentication under erratic conditions, and sub-decisions PD-01.1 to PD-01.8 (since extended: PD-01.9 adopted as the Blind Forester; PD-01.10 to PD-01.14, Break Glass and operator-gated recovery, in `BREAK-GLASS.md`). Code unchanged: only `observe` (class 1a) is accepted. Decision: PENDING
