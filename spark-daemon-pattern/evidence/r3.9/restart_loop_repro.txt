@@ -1,0 +1,2 @@
+restart loop: 4.0 s blind in total against a 1.5 s limit; DAEMON_START x4 (previous_run_ended_cleanly=[None, False, False, False]); SENSE_BLIND records: 0
+control, one uninterrupted run: exit 78

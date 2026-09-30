@@ -228,6 +228,21 @@ class NoRestartTests(unittest.TestCase):
         broken = text.replace(unitgen.RESTART_PREVENT + "\n", "")
         self.assertIn(unitgen.RESTART_PREVENT, unitgen.lint(broken))
 
+    def test_a_stop_outlasts_one_watchdog_period(self):
+        # r3.9 (HF-31): a stop is honoured between cycles; a fixed 30 s SIGKILLed slow cycles.
+        for name in ("meminfo-watch", "git-watch"):
+            m = manifest.load(os.path.join(ROOT, "examples", name, "manifest.json"))
+            text = unitgen.generate(m, root=ROOT)
+            self.assertIn(f"TimeoutStopSec={m.watchdog_seconds + 10}\n", text)
+
+    def test_git_watch_worst_case_sense_fits_half_the_watchdog(self):
+        # r3.9 (HF-30): six Git calls per worktree cycle since r3.5, each up to step_timeout.
+        m = manifest.load(os.path.join(ROOT, "examples", "git-watch", "manifest.json"))
+        with open(os.path.join(ROOT, "examples", "git-watch", "daemon.py")) as fh:
+            calls = fh.read().count("_git(ctx, [")
+        self.assertEqual(calls, 6)
+        self.assertLessEqual(calls * m.step_timeout_seconds, m.watchdog_seconds // 2)
+
     def test_uncertain_commit_stays_restartable(self):
         self.assertNotIn(70, unitgen.NO_RESTART_EXIT_CODES)
 

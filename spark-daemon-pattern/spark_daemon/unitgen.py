@@ -45,6 +45,13 @@ def _unit_path(label, path) -> str:
 NO_RESTART_EXIT_CODES = (EXIT_USAGE, EXIT_LEDGER_CORRUPT, EXIT_ALREADY_RUNNING, EXIT_POLICY)
 RESTART_PREVENT = "RestartPreventExitStatus=" + " ".join(str(c) for c in NO_RESTART_EXIT_CODES)
 
+def stop_timeout_seconds(m) -> int:
+    """r3.9 (HF-31): SIGTERM is honoured between cycles, and a cycle may legally run until the
+    watchdog would fire. A fixed 30 s turned a stop during a slow cycle (git-watch: up to six Git
+    calls of 20 s) into a SIGKILL, recorded as an unclean end. Outlast one watchdog period."""
+    return max(30, m.watchdog_seconds + 10)
+
+
 REQUIRED_DIRECTIVES = (
     "Type=notify", "NotifyAccess=main", "WatchdogSec=", "Restart=on-failure", RESTART_PREVENT,
     "UMask=0077",
@@ -100,7 +107,7 @@ def generate(m, *, root: str, python: str = "/usr/bin/python3") -> str:
         f"Environment=SPARK_DAEMON_HOME={daemon_home}",
         f"WatchdogSec={m.watchdog_seconds}",
         f"TimeoutStartSec={max(60, m.watchdog_seconds)}",
-        "TimeoutStopSec=30",
+        f"TimeoutStopSec={stop_timeout_seconds(m)}",
         "Restart=on-failure",
         RESTART_PREVENT,
         "RestartSec=10",

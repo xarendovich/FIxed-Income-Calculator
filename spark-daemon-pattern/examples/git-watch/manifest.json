@@ -12,7 +12,7 @@
   "network": {"mode": "none"},
   "run_as": {"unit": "system", "user": "spark-gitwatch"},
   "resources": {"cpu_weight": 10, "cpu_budget_bp": 100, "memory_max_mb": 64, "tasks_max": 8, "io_class": "idle"},
-  "watchdog_seconds": 120,
+  "watchdog_seconds": 240,
   "step_timeout_seconds": 20,
   "blind_limit_seconds": 7200,
   "ledger": {"record_max_bytes": 32768, "event_types": ["REPO_BASELINE", "REFS_CHANGED", "HEAD_SWITCHED", "WORKTREE_STATE_CHANGED", "REPO_AVAILABILITY_CHANGED"]},

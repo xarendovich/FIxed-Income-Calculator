@@ -25,6 +25,7 @@ spark-daemon-pattern/
                             universal-contract alignment and U-1..U-7: PD-46..PD-68
   PD-01-DAEMON-CLASSES.md   r3.6 PD-01 reopened: daemon classes, consequence levels, safety invariants (open for expansion)
   PRIOR-ART-REVIEW.md       r3.7 review of robotics, industrial, flight, automotive, operations and AI-agent practice: A-1..A-12
+  INTEGRATION-REVIEW.md     r3.9 limits in conflict (HF-28..HF-32), DB-14 comment review, blind modes, integration plan: PD-69..PD-71
   Makefile                  test | contract | check-contract | validate/precheck/battery-examples | evidence
   bin/spark-daemon          entry point; works under python3 -I -B (isolated, no bytecode)
   contract/                 generated, never hand-edited: daemon-contract.json, manifest.schema.json,
@@ -55,7 +56,7 @@ spark-daemon-pattern/
     git-watch/              refs, HEAD and worktree state via read-only ctx.git (bare-repo fixture)
   tests/                    170 self-tests and 7 fixture daemons, some deliberately bad
   evidence/                 r2 battery report and self-test output; evidence/r3/ holds the r3 runs;
-                            evidence/r3.8/ the start-up verification benchmark (U-6).
+                            evidence/r3.8/ the start-up verification benchmark (U-6); evidence/r3.9/ the restart-loop reproduction (HF-32).
                             (r2 also listed evidence/ap/, which was not in the uploaded zip: HF-23)
 ```
 
@@ -323,6 +324,7 @@ Recommendation: APPROVE. Decision: PENDING
 | r3.6 | 2026-09-29 | Claude | PD-01 reopened at the owner's request and left open for expansion (`PD-01-DAEMON-CLASSES.md`). It covers: a capability ladder (Observe 1a/1b, Advise 2a/2b, Act 3a/3b), in which a daemon never gains power itself, only request channels to a gate; a separate consequence axis (standard, elevated, critical); cross-class safety invariants S-1 to S-7, including authentication and handshakes that never degrade (connector gate, fencing, idempotency, fail-closed); scripts under the same invariants; sub-decisions PD-01.1 to PD-01.8; open questions; an expansion log. No code change. |
 | r3.7 | 2026-09-29 | Claude | Prior-art review at the owner's request (`PRIOR-ART-REVIEW.md`), covering IEC 61784-3, NAMUR NE 107, ISA-18.2, PackML, IEC 62443, NASA F´, ASTM F3269, AUTOSAR, ISO 21448, ROS 2, Autoware, UL 4600, systemd, Erlang/OTP, SPIFFE, Fuchsia, CaMeL and Levels of Autonomy. The design is confirmed in nine places, and twelve amendments to PD-01 are proposed (A-1 to A-12, `PD-01-DAEMON-CLASSES.md` §9a). Corrected HF-28: the unit's own start limit (5 in 300 s) already stopped fast 78 exits after five restarts; the endless loop applied to `SENSE_BLIND`, whose restarts are too far apart to trip it. Severity lowered to Medium. No behaviour change. |
 | r3.8 | 2026-09-29 | Claude | Universal contract (`ADJUDICATION-PLUG-AND-PLAY.md` §9). It states what is in code and what is only recorded, places the recent pieces in the L0 to L4 stack (what a component claims about itself goes in its envelope; what Spark decides goes in Spark's records), and sets three rules: the invariants become a base conformance suite (U-1); nothing safety-related in L3 (U-2); escalation meaning is a contract and delivery a binding (U-3). Four further considerations: U-4 temporal honesty (unsettled gaps are folded silently into the next event's timestamp; S-8 proposed); U-5 stop and revocation, the inverse of activation; U-6 cumulative bounds (start-up verification measured at about 20,000 records/s, so git-watch's 120 s start timeout is exceeded at about 2.4 million records; `evidence/r3.8/`); U-7 evidence that expires and independence that must be shown (a watcher built on the same skeleton shares its defects). PD-64 to PD-68. No behaviour change. |
+| r3.9 | 2026-09-30 | Claude | Integration review (`INTEGRATION-REVIEW.md`). Recurring cause of recent defects: limits checked alone, never against each other (U-8, PD-69). Fixed HF-30 (introduced by r3.5: git-watch's double read made a worst-case cycle, 6 × 20 s, equal its 120 s watchdog; watchdog now 240 s) and HF-31 (stop timeout now outlasts one watchdog period). Reproduced and left open HF-32: every start resets the blind clock, so slow restart loops hide blindness indefinitely (PD-70: observation heartbeat plus blindness counted across restarts, which also tells quiet from dead). Reviewed the DB-14 comment: the check is right; the evidence is one small fixture and per-process, not cgroup-wide; the D-6 citation is out of scope (PD-71). Blind modes for critical consequence (PD-01.9, BM-1 to BM-7): declared in advance, run by the side that still works, reconnection is a new session. Integration plan in five phases. 197 of 197 self-tests; git-watch 18 of 18 battery checks. |
 
 ## Decision log
 

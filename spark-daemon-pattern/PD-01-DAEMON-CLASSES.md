@@ -133,6 +133,9 @@ Recommendation: APPROVE the design direction; build when PD-01.5 is approached. 
 **PD-01.8. Scripts adopt the same invariants.** A script's blind period is a run deadline. A script that observed nothing never reports success: it ends with a non-success result, a typed `SENSE_BLIND` reason, and the shared escalation record. The scripts live in the Spark Script Repository, so the exact result and exit code (under SC2) are the script board's decision.
 Recommendation: APPROVE the invariant; the script board sets the exit code. Decision: PENDING
 
+**PD-01.9. Critical consequence requires declared blind modes** (section 9b). Where a running process keeps a person safe, blindness is handled by a procedure declared and validated in advance, and executed by the side that still works. It is never handled by a stop, and never by improvisation. This is a precondition for ever accepting `critical` or unlocking 3b. It adds nothing for today's observers, whose declared blind mode is "stop and call a human".
+Recommendation: APPROVE as a precondition. Decision: PENDING
+
 ## 8. Open questions (for expansion)
 
 1. **Names.** Should these classes align with the script board's tiers (T0 Observe up to TS)? The board's exact tier definitions have not been compared with this ladder.
@@ -158,6 +161,25 @@ Recommendation: APPROVE the invariant; the script board sets the exit code. Deci
 - **A-11:** IEC 62443 conduits and security levels for declared connections [section 6].
 - **A-12:** freedom from interference, disk in particular, between daemons of different consequence [section 4].
 
+## 9b. Blind modes for critical consequence (r3.9)
+
+**Source:** the owner's requirement that the design consider "events in which connection and stability of the running process ensures the safety of life on the other end: a way for it to be flown and controlled if blind". Established practice answers consistently:
+- **pitch and power:** when airspeed data fails, pilots fly memorised attitude and thrust settings that are safe without the failed sensor;
+- **lost link:** a drone that loses its command link executes a pre-set procedure on board (loiter, return home, land);
+- **minimal-risk manoeuvre:** an automated vehicle steps down through fallback modes (Autoware, `PRIOR-ART-REVIEW.md`);
+- **simplex:** a monitor switches to a verified recovery function (ASTM F3269).
+
+Requirements, for any function whose failure could hurt someone:
+- **BM-1. Blind is a declared mode, not an accident.** Before activation, the function declares what it does when blind: sensor-independent settings proven safe across its operating envelope, or a lost-link procedure. The declaration is tested like any other contract.
+- **BM-2. The procedure runs on the side that still works.** A lost connection means Spark can command nothing, so the far side (the device or controller) must be able to act safely alone.
+- **BM-3. An independent monitor makes the switch, not the blind component.** This is the simplex rule. The monitor shares as little as possible with what it watches (U-7).
+- **BM-4. Degradation is graded, one-way, and time-bounded.** Normal leads to a fallback mode with a declared maximum duration, then to a minimal-risk condition. There is no automatic return to normal without revalidation (the same rule as Autoware's comfortable stop to emergency stop).
+- **BM-5. Request to intervene, with a no-response path.** A human is asked to take over when the first degradation begins, with a bounded time to respond. No answer moves the system to the next level, never back.
+- **BM-6. Reconnection is a new session.** After a lost link, control resumes only after full re-authentication (S-5) and a reconciliation of what happened meanwhile. Outcomes of that period are reported as unknown until proven (LTC `UNKNOWN_AFTER_RESTART`).
+- **BM-7. Blind modes are drilled** on a schedule, in production conditions (U-7).
+
+**The boundary for Spark:** no process on the DGX may sit in the loop that keeps a person safe. Spark may observe that loop and advise it. The loop itself runs on an independent controller with its own sensors and declared blind modes. Spark never flies anything blind; it makes sure whatever flies has a declared way to fly blind.
+
 ## 9. Expansion log
 
 Add entries at the end; never rewrite earlier ones.
@@ -171,3 +193,4 @@ Add entries at the end; never rewrite earlier ones.
 | 2026-09-29 | Authentication | Owner, Claude | Connecting to systems with their own safety handoffs: authentication and handshakes never degrade (S-5, S-7, section 6) |
 | 2026-09-29 | Prior-art review | Owner, Claude | Robotics, industrial, flight, automotive, operations and AI-agent sources reviewed (`PRIOR-ART-REVIEW.md`); twelve amendments proposed (section 9a); HF-28 description corrected |
 | 2026-09-29 | Universal contract | Owner, Claude | Alignment with the L0 to L4 stack and rules U-1 to U-3; four further considerations (U-4 temporal honesty, adding S-8; U-5 stop and revocation; U-6 cumulative bounds, measured; U-7 assurance of the assurance), PD-64 to PD-68 in `ADJUDICATION-PLUG-AND-PLAY.md` section 9 |
+| 2026-09-30 | Blind modes | Owner, Claude | Life depending on a running process: blind is a declared mode, run by the side that still works (BM-1 to BM-7, section 9b, PD-01.9); limit-interaction findings and the integration plan in `INTEGRATION-REVIEW.md` |
