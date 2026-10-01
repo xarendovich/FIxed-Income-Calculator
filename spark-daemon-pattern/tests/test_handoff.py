@@ -296,6 +296,23 @@ class PrecheckTests(unittest.TestCase):
         code, r = self.precheck(os.path.join(EXAMPLES, "meminfo-watch", "manifest.json"))
         self.assertNotEqual(r["result"], "PASS")
 
+    def test_an_absolute_output_dir_prechecks_like_the_battery(self):
+        # r4.7 (HF-37): the battery and precheck both rewrite an absolute output_dir into their
+        # workspace, but precheck bound the original manifest: "no ledger", and the rewritten
+        # folder reported as a write outside the output directory. The battery passed it.
+        tmp = tempfile.mkdtemp()
+        try:
+            data = load_json(os.path.join(EXAMPLES, "meminfo-watch", "manifest.json"))
+            data["output_dir"] = "/srv/example/logs/meminfo-watch"
+            with open(os.path.join(tmp, "manifest.json"), "w") as fh:
+                json.dump(data, fh)
+            shutil.copy(os.path.join(EXAMPLES, "meminfo-watch", "daemon.py"), tmp)
+            code, r = self.precheck(os.path.join(tmp, "manifest.json"))
+            self.assertEqual(code, 0, json.dumps(r["checks"]))
+            self.assertEqual([c["state"] for c in r["checks"][:3]], ["PASS", "PASS", "PASS"])
+        finally:
+            shutil.rmtree(tmp)
+
 
 class ScaffoldTests(unittest.TestCase):
     def test_refuses_a_non_empty_folder_and_bad_names(self):

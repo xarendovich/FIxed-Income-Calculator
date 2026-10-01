@@ -246,7 +246,12 @@ def precheck_report(manifest_path: str, envelope_path: str | None = None, workdi
                "evidence": f"{validation['error_count']} error(s), {validation['warning_count']} warning(s)"}]
     if validation["valid"]:
         ws = battery.Workspace(manifest_path, workdir)
-        ws.bind_manifest(m)
+        # r4.7 (HF-37): bind the workspace's copy, as the battery does (DB-01). An absolute
+        # output_dir is rewritten into the workspace; binding the original manifest made the
+        # confined run look for its ledger in the real output directory and count the
+        # rewritten one as a write outside the output directory.
+        from . import manifest as manifest_mod
+        ws.bind_manifest(manifest_mod.load(ws.manifest))
         smoke = battery.Check("PC-02", "confined run (2 cycles, Landlock, audit hook recording)")
         battery.db03(ws, smoke, cycles=2)
         provenance = battery.Check("PC-03", "ledger integrity and provenance")
