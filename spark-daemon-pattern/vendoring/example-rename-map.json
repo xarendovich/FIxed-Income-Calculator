@@ -1,0 +1,9 @@
+{
+  "schema": "spark-daemon-rename-map/1",
+  "roots": ["bin", "contract", "spark_daemon", "verifier"],
+  "replace": [
+    ["spark_daemon", "acme_daemon"],
+    ["SPARK_DAEMON", "ACME_DAEMON"],
+    ["spark-daemon", "acme-daemon"]
+  ]
+}
