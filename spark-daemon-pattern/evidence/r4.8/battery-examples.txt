@@ -1,0 +1,5 @@
+examples/dir-watch/ RESULT: PASS
+examples/disk-watch/ RESULT: PASS
+examples/git-watch/ RESULT: PASS
+examples/meminfo-watch/ RESULT: PASS
+exit 0
