@@ -3,6 +3,7 @@
 - **Status:** PROPOSED, for the owner and for review. It changes no code. It recommends ten decisions (PD-99 to PD-108). Five of them withdraw or shrink work this repository itself recommended earlier; each one says so.
 - **Revision:** r4.9, 2026-10-06, by Claude.
 - **Asked:** the owner asked to close the seams and invariants within the scope and boundaries found so far, to find assumptions, responsibilities or boundaries that are misplaced or more complex than they need to be, and to push for the smallest stable design that can be frozen without future architectural debt.
+- **See also:** `DISCOVERY-GUIDE-R4.10.md` walks reviewers through how each seam arose and proposes eight refinements (R-1 to R-8), some simpler than the answers below. R-5 would change INV-5 and needs the owner.
 - **Evidence:** every claim is **traced** to code or **measured** here (one new probe, `evidence/r4.9/ledger_growth_probe.txt`), unless it says **opinion**.
 
 ## 1. Answer in brief
