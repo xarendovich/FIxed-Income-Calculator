@@ -1,0 +1,3 @@
+   10000 records      5.8 MB  recover   0.38 s
+   50000 records     28.9 MB  recover   1.51 s
+  200000 records    115.9 MB  recover   7.05 s

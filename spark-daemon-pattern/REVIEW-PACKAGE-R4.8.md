@@ -5,7 +5,7 @@
 - **Revision:** r4.8, 2026-10-06, by Claude.
 - **State at r4.8:**
   - contract 3.1.0 (unchanged since r4.5);
-  - 214 of 214 self-tests pass, none skipped (Python 3.12, with `jsonschema` 4.26 for the four schema-agreement tests; `evidence/r4.8/selftests.txt`);
+  - 214 of 214 self-tests pass, none skipped (Python 3.11.15, with `jsonschema` 4.26 for the four schema-agreement tests; `evidence/r4.8/selftests.txt`);
   - the four reference daemons pass all 19 battery checks (DB-01 to DB-18 and DB-20) on the build workspace, Landlock ABI 7 (`evidence/r4.8/battery-examples.txt`);
   - the pattern has been ported to its **first pilot project** and merged there, with one observer daemon (§2).
 - **Supersedes:** the status and seam tables of `REVIEW-PACKAGE-COMBINED.md` (r4.4) and `REVIEW-PACKAGE-R4.5.md` (r4.5). The detail in those documents still holds unless this one says otherwise; it is cited, not repeated.
