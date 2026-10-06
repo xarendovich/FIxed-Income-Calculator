@@ -6,6 +6,8 @@ Order at start (each step must succeed before the next):
  3. prepare the output directory (0700, owned, no symlink) -> exit 78 if unsafe
  4. take the single-instance lock                         -> exit 73 if already running
  5. static purity check of daemon.py                      -> exit 2 on problems
+    then the qualification gate (r4.11): the digests a qualified unit carries must match;
+    outside test mode a start without them is refused       -> exit 78
  6. apply the Landlock domain (r2, AP-01)                 -> exit 78 outside test mode if
     unavailable or too old (PD-15); before the audit hook, because the hook blocks ctypes,
     which this step still needs
@@ -161,7 +163,7 @@ class _Stop:
         self.reason = f"signal {signal.Signals(signum).name}"
 
 
-def run(manifest_path: str, max_cycles: int | None = None) -> int:
+def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None = None) -> int:
     os.umask(0o077)
     sys.dont_write_bytecode = True
 
@@ -220,6 +222,22 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
         return EXIT_USAGE
     with open(m.code_path, "rb") as fh:
         code_sha = sha256_hex(fh.read())
+    # r4.11 (R-3): a daemon runs for real only from a qualified unit, whose ExecStart carries the
+    # digests a qualifying battery PASS bound. Code or a manifest changed since then never starts,
+    # and a preview unit (no digests) is refused outside test mode. Both need a person: 78.
+    if expect is not None:
+        from .contract import contract_identity
+        actual = {"manifest_sha256": m.sha256, "daemon_code_sha256": code_sha,
+                  "contract_sha256": contract_identity()["contract_sha256"]}
+        changed = [key for key in actual if actual[key] != expect.get(key)]
+        if changed:
+            log(f"not the qualified daemon: {', '.join(changed)} differ from its battery PASS; "
+                "refusing to start (qualify it again with battery --emit-unit)")
+            return EXIT_POLICY
+    elif not test_mode:
+        log("not qualified: started without the digests of a battery PASS (a preview unit, or by "
+            "hand); refusing to start. An installable unit comes from battery --emit-unit")
+        return EXIT_POLICY
 
     guard.remove_stray_temp_files(out)
     tool_versions = _tool_versions(policy, m.step_timeout_seconds)
@@ -276,6 +294,7 @@ def run(manifest_path: str, max_cycles: int | None = None) -> int:
         start_boottime_ms = _boottime_ms()
         recent.append(writer.append("DAEMON_START", {
             "skeleton_version": VERSION,
+            "qualified": expect is not None,
             "manifest_sha256": m.sha256,
             "daemon_code_sha256": code_sha,
             "tools": tool_versions,

@@ -55,10 +55,18 @@ class Sandbox:
         with open(path, "w") as fh:
             fh.write(text)
 
-    def run(self, cycles=3, timeout=30, **env):
+    def qualified_args(self):
+        """What a qualified unit's ExecStart adds (r4.11, R-3): the digests of the files as they
+        are, so a run outside test mode is accepted by the runtime's qualification gate."""
+        from spark_daemon import qualify
+        return qualify.expect_args(qualify.expected_identity(self.manifest))
+
+    def run(self, cycles=3, timeout=30, qualified=False, **env):
         args = [sys.executable, "-I", "-B", ENTRY, "run", "--manifest", self.manifest]
         if cycles is not None:
             args += ["--max-cycles", str(cycles)]
+        if qualified:
+            args += self.qualified_args()
         return subprocess.run(args, env=self.env(**env), capture_output=True, text=True, timeout=timeout)
 
     def cli(self, *args, timeout=60, **env):

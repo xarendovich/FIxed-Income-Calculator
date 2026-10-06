@@ -539,8 +539,8 @@ def db20(ws, c, cycles=12, limit_intervals=5):
                       f"heartbeat(s); no SENSE_BLIND within a {limit_ms} ms limit")
 
 
-def db15(ws, c, threshold):
-    text = unitgen.generate(ws.m, root=PATTERN_ROOT)
+def db15(ws, c, threshold, unit_options=None):
+    text = unitgen.generate(ws.m, root=PATTERN_ROOT, **(unit_options or {}))
     missing = unitgen.lint(text)
     unit_path = os.path.join(ws.root, unitgen.unit_name(ws.m))
     with open(unit_path, "w") as fh:
@@ -677,14 +677,19 @@ def db18(ws, c):
 
 
 def main(manifest_path: str, *, seed: int, quick: bool, workdir: str | None, threshold: int,
-         envelope: str | None = None) -> int:
-    """The battery profile of the one judge (judge.py, r4.11): every registered check."""
-    from . import contract, judge
+         envelope: str | None = None, unit_options: dict | None = None,
+         emit_unit: str | None = None) -> int:
+    """The battery profile of the one judge (judge.py, r4.11): every registered check. With
+    emit_unit, a qualifying PASS also writes the installable unit and its record (qualify.py)."""
+    from . import contract, judge, qualify
     if not os.path.exists(manifest_path):
         print(f"no manifest at {manifest_path}")
         return EXIT_USAGE
+    if emit_unit and quick:
+        print("--emit-unit needs the full battery: --quick does not qualify")
+        return EXIT_USAGE
     j = judge.run("battery", manifest_path, envelope=envelope, workdir=workdir, seed=seed,
-                  quick=quick, threshold=threshold)
+                  quick=quick, threshold=threshold, unit_options=unit_options)
     if j.ws is None:
         j.ws = Workspace.__new__(Workspace)            # nothing ran: a report folder only
         j.ws.root = os.path.realpath(workdir or tempfile.mkdtemp(prefix="spark-battery-"))
@@ -697,7 +702,8 @@ def main(manifest_path: str, *, seed: int, quick: bool, workdir: str | None, thr
         "schema": BATTERY_SCHEMA, "skeleton_version": VERSION, **contract.contract_identity(),
         "profile": j.profile, "qualifying": j.qualifying,
         "candidate": candidate, "result": j.result, "seed": seed,
-        "quick": quick, "daemon": j.m.name if j.m else None,
+        "quick": quick, "unit_options": j.unit_options, "host": qualify.host_facts(),
+        "daemon": j.m.name if j.m else None,
         # The manifest as written, which is what a unit runs; run checks used the workspace's
         # copy, whose digest differs when an absolute output_dir was rewritten.
         "manifest_sha256": j.m.sha256 if j.m else None,
@@ -722,5 +728,14 @@ def main(manifest_path: str, *, seed: int, quick: bool, workdir: str | None, thr
         for d in candidate["diagnostics"]:
             print(f"candidate: {d['where']}: {d['message']}")
     print(f"report: {report_path}")
+    if emit_unit:
+        try:
+            unit_path, record_path = qualify.emit(j, emit_unit, report_path)
+        except qualify.Refused as e:
+            print(f"installable unit: not emitted ({e})")
+        else:
+            print(f"installable unit: {unit_path}")
+            print(f"qualification record: {record_path}")
+            print("note: qualification is not activation; installing and enabling are a person's decision")
     print(f"RESULT: {j.result}")
     return judge.exit_code(j.result)

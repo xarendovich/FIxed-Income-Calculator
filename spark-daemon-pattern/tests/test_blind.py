@@ -298,7 +298,7 @@ class BlindPeriodTests(unittest.TestCase):
         sb.write("data/mode.txt", "busy")
         # Outside test mode the manifest's 600 s applies, and the interval is the manifest's
         # 5 s, so one cycle then max-cycles stops it well inside the limit.
-        p = sb.run(cycles=1, SPARK_DAEMON_TEST="0", SPARK_DAEMON_TEST_BLIND_LIMIT_MS="100",
+        p = sb.run(cycles=1, qualified=True, SPARK_DAEMON_TEST="0", SPARK_DAEMON_TEST_BLIND_LIMIT_MS="100",
                    SPARK_DAEMON_AUDIT="enforce")
         self.assertEqual(p.returncode, EXIT_OK, p.stderr)
         self.assertNotIn("blind_limit_ms", sb.records()[0]["payload"]["test_overrides"])

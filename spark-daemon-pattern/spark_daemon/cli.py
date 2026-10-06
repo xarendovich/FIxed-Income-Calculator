@@ -1,7 +1,7 @@
 """Command line.
 
 Authoring and handoff: describe | schema | scaffold | envelope | validate | precheck
-Evidence and operation: battery | unit | run | verify
+Evidence and operation: battery | qualified | unit (a preview) | run | verify
 Internal (the battery's child processes): probe-policy | probe-landlock | probe-digest
 """
 
@@ -44,7 +44,7 @@ def main(argv=None) -> int:
     p.add_argument("--envelope", default=None)
     p.add_argument("--workdir", default=None)
 
-    p = sub.add_parser("unit", help="print the generated systemd unit and install plan (never installs)")
+    p = sub.add_parser("unit", help="print a PREVIEW of the unit, or the install plan (never installs; not installable: see battery --emit-unit)")
     p.add_argument("--manifest", required=True)
     p.add_argument("--python", default="/usr/bin/python3")
     p.add_argument("--plan", action="store_true", help="print the install plan instead of the unit")
@@ -56,6 +56,10 @@ def main(argv=None) -> int:
     p = sub.add_parser("run", help="run the daemon in the foreground (systemd calls this)")
     p.add_argument("--manifest", required=True)
     p.add_argument("--max-cycles", type=int, default=None)
+    from .qualify import EXPECT_KEYS
+    for key in EXPECT_KEYS:
+        p.add_argument(f"--expect-{key.replace('_', '-')}", dest=f"expect_{key}", default=None,
+                       help="set by a qualified unit (r4.11): refuse to start unless this digest matches")
 
     p = sub.add_parser("verify", help="verify a daemon's ledger read-only and print its chain head")
     p.add_argument("--manifest", required=True)
@@ -67,6 +71,17 @@ def main(argv=None) -> int:
     p.add_argument("--workdir", default=None)
     p.add_argument("--threshold", type=int, default=20, help="systemd-analyze exposure threshold in tenths (20 = 2.0)")
     p.add_argument("--envelope", default=None, help="candidate.json to quote in the report")
+    p.add_argument("--emit-unit", default=None, metavar="DIR",
+                   help="on a qualifying PASS (not --quick), write the installable unit and its "
+                        "qualification record into DIR; nothing is installed or enabled")
+    p.add_argument("--require-path", action="append", default=[],
+                   help="unit option: a path that must exist for the unit to start; repeatable")
+    p.add_argument("--part-of", default=None, help="unit option: start and stop with this unit")
+    p.add_argument("--python", default="/usr/bin/python3", help="unit option: the interpreter the unit runs")
+
+    p = sub.add_parser("qualified", help="check a unit against its qualification record, the files and this host")
+    p.add_argument("--unit", required=True)
+    p.add_argument("--record", required=True)
 
     p = sub.add_parser("probe-policy", help=argparse.SUPPRESS)
     p.add_argument("--manifest", required=True)
@@ -172,7 +187,13 @@ def main(argv=None) -> int:
 
     if args.command == "run":
         from . import runtime
-        return runtime.run(args.manifest, max_cycles=args.max_cycles)
+        from .qualify import EXPECT_KEYS
+        given = {key: getattr(args, f"expect_{key}") for key in EXPECT_KEYS}
+        if any(given.values()) and not all(given.values()):
+            print("the three --expect-*-sha256 options go together", file=sys.stderr)
+            return EXIT_USAGE
+        return runtime.run(args.manifest, max_cycles=args.max_cycles,
+                           expect=given if all(given.values()) else None)
 
     if args.command == "verify":
         from . import LEDGER_NAME, ledger, manifest
@@ -203,7 +224,18 @@ def main(argv=None) -> int:
     if args.command == "battery":
         from . import battery
         return battery.main(args.manifest, seed=args.seed, quick=args.quick, workdir=args.workdir,
-                            threshold=args.threshold, envelope=args.envelope)
+                            threshold=args.threshold, envelope=args.envelope, emit_unit=args.emit_unit,
+                            unit_options={"python": args.python, "require_paths": args.require_path,
+                                          "part_of": args.part_of})
+
+    if args.command == "qualified":
+        from . import qualify
+        problems = qualify.check(args.unit, args.record)
+        for problem in problems:
+            print(f"not qualified: {problem}")
+        print("RESULT: NOT QUALIFIED" if problems else
+              "RESULT: QUALIFIED (evidence for an activation decision; it activates nothing)")
+        return EXIT_FAILED if problems else EXIT_OK
 
     if args.command == "probe-policy":
         from . import probes

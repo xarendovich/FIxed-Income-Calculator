@@ -82,7 +82,7 @@ class Judgement:
     """What one run of one profile saw and decided."""
 
     def __init__(self, profile, manifest_path, *, envelope=None, workdir=None, seed=20260927,
-                 quick=False, threshold=20):
+                 quick=False, threshold=20, unit_options=None):
         if profile not in PROFILES:
             raise ValueError(f"unknown profile {profile!r}")
         self.profile = profile
@@ -94,6 +94,12 @@ class Judgement:
         self.seed = seed
         self.quick = quick
         self.threshold = threshold
+        # The options of the unit being qualified (r4.11, R-3): inputs to the judgement, so DB-15
+        # and DB-25 judge the exact unit an emitted record binds.
+        opts = dict(unit_options or {})
+        self.unit_options = {"python": opts.get("python") or "/usr/bin/python3",
+                             "require_paths": list(opts.get("require_paths") or ()),
+                             "part_of": opts.get("part_of")}
         self.rng = random.Random(seed)
         self.m = None                 # the manifest as written: the identity reports bind
         self.code_sha = None
@@ -180,7 +186,7 @@ def _db25(j, c):
         return
     from .battery import PATTERN_ROOT
     try:
-        text = unitgen.generate(j.m, root=PATTERN_ROOT)
+        text = unitgen.generate(j.m, root=PATTERN_ROOT, **j.unit_options)
     except unitgen.UnitError as e:
         c.state, c.evidence = FAIL, str(e)
         c.diagnostics = [diagnostic("unit", str(e), where="unit")]
@@ -220,7 +226,7 @@ def _registry():
         Spec("DB-12", "single instance and SIGTERM", "run", lambda j, c: b.db12(j.ws, c)),
         Spec("DB-13", "audit hook blocks forbidden operations", "run", lambda j, c: b.db13(j.ws, c)),
         Spec("DB-14", "resource budget", "run", lambda j, c: b.db14(j.ws, c)),
-        Spec("DB-15", "unit hardening", "run", lambda j, c: b.db15(j.ws, c, j.threshold)),
+        Spec("DB-15", "unit hardening", "run", lambda j, c: b.db15(j.ws, c, j.threshold, j.unit_options)),
         Spec("DB-16", "read-only verification", "run", lambda j, c: b.db16(j.ws, c)),
         Spec("DB-17", "Landlock blocks with the audit hook record-only", "run", lambda j, c: b.db17(j.ws, c)),
         Spec("DB-18", "DAEMON_START.landlock matches host and manifest", "run", lambda j, c: b.db18(j.ws, c)),

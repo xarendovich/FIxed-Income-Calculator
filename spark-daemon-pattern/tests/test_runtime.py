@@ -211,7 +211,7 @@ class RuntimeTests(unittest.TestCase):
         del env["SPARK_DAEMON_TEST_INTERVAL_MS"]
         p = subprocess.run(
             [sys.executable, "-I", "-B", os.path.join(ROOT, "bin", "spark-daemon"),
-             "run", "--manifest", b2.manifest, "--max-cycles", "1"],
+             "run", "--manifest", b2.manifest, "--max-cycles", "1", *b2.qualified_args()],
             env=env, capture_output=True, text=True, timeout=30)
         self.assertEqual(p.returncode, EXIT_OK, p.stderr)
         self.assertEqual(b2.records()[0]["payload"]["jitter_max_ms"], 250)  # 5s * 5%

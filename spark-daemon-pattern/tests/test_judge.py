@@ -7,7 +7,7 @@ import re
 import unittest
 from unittest import mock
 
-from helpers import EXAMPLE, FIXTURES, ROOT
+from helpers import EXAMPLE, FIXTURES
 from spark_daemon import battery, handoff, judge
 
 OPENER = os.path.join(FIXTURES, "opener", "manifest.json")      # impure: calls open()
