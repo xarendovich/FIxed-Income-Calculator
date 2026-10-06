@@ -2,9 +2,9 @@
 
 - **Implements:** `ADJUDICATION-R4.9-OWNER.md`, the owner-approved decisions on R-1 to R-8, within the bounded package that handoff authorizes. No daemon class is unlocked, nothing is activated, and Break Glass and LTC authority are unchanged.
 - **Revision:** r4.11, 2026-10-06, by Claude.
-- **Candidate (code):** `55bb8b4e654737ea3a23f7d234d7daa0b1113924` on branch `claude/clever-bardeen-qqkxez`. This record and the evidence files were committed on top of it and change no code.
+- **Candidate (code):** `926720f313022abe7fde10279ece43b37242d796` on branch `claude/clever-bardeen-qqkxez` (`55bb8b4` plus the HF-40 fix). This record and the evidence files were committed on top of it and change no code.
 - **Evidence at the candidate:**
-  - 266 of 266 self-tests pass, none skipped (Python 3.11.15, `jsonschema` 4.26; `evidence/r4.11/selftests.txt`).
+  - 267 of 267 self-tests pass, none skipped (Python 3.11.15, `jsonschema` 4.26; `evidence/r4.11/selftests.txt`).
   - The four reference daemons pass all 22 battery checks (`evidence/r4.11/battery-examples.txt`).
   - `git diff --check` is clean.
   - A sample qualified unit, with its record and the installer gate's verdict, is in `evidence/r4.11/qualified-sample/`.
@@ -77,6 +77,7 @@ Both stated properties hold: precheck needs no tool beyond Python and no network
 - **precheck says PASS.** With one result vocabulary, precheck's "OK" became "PASS", reported with `qualifying: false`. The old safeguard, that precheck never says PASS, is now enforced mechanically: only a qualifying battery PASS emits a unit, and the runtime refuses any other start.
 - **HF-38 (Low), fixed.** Found while writing the independent verifier: a first record whose `seq` was the JSON boolean `true` verified as seq 1 (`True == 1` in Python). The first draft of the independent verifier had the same blind spot. Both now require an int, and DB-22 checks it on every daemon.
 - **HF-39 (Low), fixed.** Found while building R-3: the battery report bound its workspace copy of the manifest. For a daemon with an absolute `output_dir` (the pilot's), that copy is rewritten, so the report named a digest the installed manifest never has, and a qualified unit would never have started. Reports now bind the manifest as written and name the workspace copy separately. `tests/test_judge.py::NoStandaloneJudgeTests::test_reports_bind_the_manifest_as_written`.
+- **HF-40 (Low), fixed.** Found while preparing the design review (`REVIEW-PACKAGE-R4.11.md`): two mechanisms enforce the cycle budget, `proc`'s timeout and the cycle's alarm, and they meet at the same deadline. A command that closed its stdout and kept running sent `proc.run` into its cleanup wait. An alarm raised during that wait left before the process group was killed, so the command outlived the cycle, one per cycle. The cleanup now kills a still-running group on every exit path. `tests/test_proc.py::test_an_exception_mid_wait_still_kills_the_group`; `evidence/r4.11/alarm_child_leak_*`.
 - **Run checks are SKIPPED once a static check fails.** The battery used to run them and report FAIL. The verdict is the same, and the battery is faster.
 - **Battery IDs.** DB-19, DB-21 and DB-23 stay reserved. DB-22, DB-24 and DB-25 are new.
 
@@ -106,7 +107,7 @@ Both stated properties hold: precheck needs no tool beyond Python and no network
 | Gate item | Status |
 | --- | --- |
 | Contract and schemas at 4.0.0 where the breaking semantics need it | Done: contract 4.0.0, manifest schema 3, report schemas 2, `contract/versions.json` |
-| All earlier tests green, or migrated with stable replacement IDs | Done: 266 of 266. Precheck's PC-IDs were replaced by registry IDs; no DB-ID changed meaning |
+| All earlier tests green, or migrated with stable replacement IDs | Done: 267 of 267. Precheck's PC-IDs were replaced by registry IDs; no DB-ID changed meaning |
 | New focused tests pass | Done (§1) |
 | Mutation and adversarial tests for the command boundary, unified judge, cycle deadline, shared interpreter and checkpoint continuity | Done for the first four. Checkpoint continuity: **not applicable**, since R-5c is gated (§2.2) |
 | An installable unit comes only from a complete battery PASS | Done (R-3 tests) |

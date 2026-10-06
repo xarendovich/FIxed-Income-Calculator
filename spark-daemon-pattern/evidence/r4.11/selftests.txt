@@ -1,4 +1,4 @@
-candidate: 55bb8b4e654737ea3a23f7d234d7daa0b1113924
+candidate: 926720f313022abe7fde10279ece43b37242d796
 Python 3.11.15
 jsonschema 4.26.0
 test_at_least_three_intervals (test_blind.BlindLimitManifestTests.test_at_least_three_intervals) ... ok
@@ -219,6 +219,7 @@ test_install_plan_is_text_only (test_misc.UnitgenTests.test_install_plan_is_text
 test_lint_detects_a_removed_directive (test_misc.UnitgenTests.test_lint_detects_a_removed_directive) ... ok
 test_part_of_binds_the_unit_to_another (test_misc.UnitgenTests.test_part_of_binds_the_unit_to_another) ... ok
 test_user_units_carry_a_warning (test_misc.UnitgenTests.test_user_units_carry_a_warning) ... ok
+test_an_exception_mid_wait_still_kills_the_group (test_proc.ProcTests.test_an_exception_mid_wait_still_kills_the_group) ... ok
 test_git_ignores_user_configuration (test_proc.ProcTests.test_git_ignores_user_configuration)
 Script-board F5: color.ui=always and diff.external in the user's config must not leak. ... ok
 test_index_copy_leaves_the_real_index_untouched (test_proc.ProcTests.test_index_copy_leaves_the_real_index_untouched)
@@ -279,6 +280,6 @@ test_the_rename_is_deterministic (test_vendor.VendorTests.test_the_rename_is_det
 test_the_tool_imports_nothing_from_the_pattern (test_vendor.VendorTests.test_the_tool_imports_nothing_from_the_pattern) ... ok
 
 ----------------------------------------------------------------------
-Ran 266 tests in 139.530s
+Ran 267 tests in 147.536s
 
 OK
