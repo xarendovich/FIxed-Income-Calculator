@@ -10,7 +10,7 @@ import unittest
 from helpers import ROOT  # noqa: F401
 from spark_daemon import proc
 
-EXE = {name: shutil.which(name, path="/usr/bin:/bin") for name in ("git", "seq", "sleep", "cat")}
+EXE = {name: shutil.which(name, path=proc.SYSTEM_PATH) for name in ("git", "seq", "sleep", "cat")}
 
 
 def sh_git(repo, *args, env=None):

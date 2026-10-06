@@ -12,7 +12,7 @@ import tempfile
 import unittest
 
 from helpers import ENTRY, FIXTURES, ROOT, Sandbox
-from spark_daemon import contract, handoff, manifest, scaffold
+from spark_daemon import contract, handoff, manifest, proc, scaffold
 
 CONTRACT_DIR = os.path.join(ROOT, "contract")
 EXAMPLES = os.path.join(ROOT, "examples")
@@ -26,7 +26,7 @@ except ImportError:          # optional: CI installs it; the stdlib-only runtime
 
 def cli(*args, timeout=120):
     return subprocess.run([sys.executable, "-I", "-B", ENTRY, *args], capture_output=True, text=True,
-                          timeout=timeout, env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent", "LANG": "C.UTF-8"})
+                          timeout=timeout, env={"PATH": proc.SYSTEM_PATH, "HOME": "/nonexistent", "LANG": "C.UTF-8"})
 
 
 def load_json(path):
@@ -62,7 +62,7 @@ class PublishedContractTests(unittest.TestCase):
             if not exe:
                 continue
             p = subprocess.run([exe, "-I", "-B", ENTRY, "describe", "--identity"], capture_output=True, text=True,
-                               timeout=60, env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"})
+                               timeout=60, env={"PATH": proc.SYSTEM_PATH, "HOME": "/nonexistent"})
             if p.returncode == 0:
                 seen[version] = json.loads(p.stdout)["contract_sha256"]
         if len(seen) < 2:

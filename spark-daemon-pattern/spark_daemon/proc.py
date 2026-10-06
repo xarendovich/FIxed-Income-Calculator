@@ -1,7 +1,7 @@
 """Hardened, bounded subprocess execution for allowlisted commands only.
 
 - argv lists only, never a shell; the executable must be one the manifest names, resolved
-  to an absolute path under /usr/bin or /bin at startup;
+  to an absolute path in SYSTEM_PATH at startup;
 - a scrubbed environment: fixed PATH and locale, no pager, no prompts, and Git's system and
   global configuration switched off, so settings such as color.ui=always or diff.external
   cannot leak into evidence (script-board finding F5);
@@ -17,8 +17,11 @@ import subprocess
 import time
 from dataclasses import dataclass
 
+# The only directories an allowlisted command is resolved in, and the PATH every child gets.
+SYSTEM_PATH = "/usr/bin:/bin"
+
 SAFE_ENV = {
-    "PATH": "/usr/bin:/bin",
+    "PATH": SYSTEM_PATH,
     "LC_ALL": "C",
     "LANG": "C",
     "HOME": "/nonexistent",

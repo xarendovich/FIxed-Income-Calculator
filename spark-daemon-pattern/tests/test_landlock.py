@@ -12,7 +12,7 @@ import unittest
 from collections import namedtuple
 
 from helpers import ROOT  # noqa: F401  (puts the package on sys.path)
-from spark_daemon import landlock
+from spark_daemon import landlock, proc
 
 FakePolicy = namedtuple("FakePolicy", ["output_dir", "reads", "deny"])
 
@@ -199,7 +199,7 @@ class EnforcementTests(unittest.TestCase):
         directory, or dropped by someone else into a watched folder, could be run. Execute stays
         only on the system and interpreter paths the allowlisted commands live in."""
         home = self.home
-        true_bin = shutil.which("true", path="/usr/bin:/bin")
+        true_bin = shutil.which("true", path=proc.SYSTEM_PATH)
         dropped = os.path.join(home, "reads", "dropped")
         shutil.copyfile(true_bin, dropped)
         os.chmod(dropped, 0o755)

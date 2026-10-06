@@ -264,7 +264,7 @@ def precheck_report(manifest_path: str, envelope_path: str | None = None, workdi
         else:
             unit_error = ""
         missing = unitgen.lint(text) if text else []
-        analyze = battery.shutil.which("systemd-analyze", path="/usr/bin:/bin")
+        analyze = battery.shutil.which("systemd-analyze", path=battery.proc.SYSTEM_PATH)
         blocked = battery._startup_syscalls_blocked(analyze, text) if analyze and text else None
         if unit_error:
             unit.state, unit.evidence = "FAIL", unit_error

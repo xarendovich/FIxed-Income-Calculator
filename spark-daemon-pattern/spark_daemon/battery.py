@@ -47,7 +47,7 @@ from dataclasses import asdict, dataclass
 
 from . import (BATTERY_SCHEMA, EXIT_FAILED, EXIT_FLAGGED, EXIT_OK, EXIT_USAGE, LEDGER_NAME,
                QUARANTINE_DIR, RESERVED_EVENT_TYPES, VERSION, guard, landlock, ledger,
-               manifest as manifest_mod, purity, unitgen)
+               manifest as manifest_mod, proc, purity, unitgen)
 from .canonical import sha256_hex, strict_loads
 
 PATTERN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -110,7 +110,7 @@ class Workspace:
         self.ledger = os.path.join(self.output, LEDGER_NAME)
 
     def env(self, **extra):
-        env = {"HOME": self.home, "SPARK_DAEMON_HOME": self.home, "PATH": "/usr/bin:/bin",
+        env = {"HOME": self.home, "SPARK_DAEMON_HOME": self.home, "PATH": proc.SYSTEM_PATH,
                "LANG": "C.UTF-8", "SPARK_DAEMON_TEST": "1",
                "SPARK_DAEMON_TEST_INTERVAL_MS": str(TEST_INTERVAL_MS), "PYTHONDONTWRITEBYTECODE": "1"}
         env.update({k: v for k, v in extra.items() if v is not None})
@@ -369,7 +369,7 @@ def db07(ws, c):
 
 
 def _strace():
-    return shutil.which("strace", path="/usr/bin:/bin")
+    return shutil.which("strace", path=proc.SYSTEM_PATH)
 
 
 def _fault(ws, c, inject_args, label):
@@ -568,7 +568,7 @@ def db15(ws, c, threshold):
     if missing:
         c.state, c.evidence = "FAIL", f"missing directives: {', '.join(missing)}"
         return
-    analyze = shutil.which("systemd-analyze", path="/usr/bin:/bin")
+    analyze = shutil.which("systemd-analyze", path=proc.SYSTEM_PATH)
     if not analyze:
         c.state, c.evidence = "UNKNOWN", "all required directives present; systemd-analyze not installed"
         return
@@ -780,7 +780,7 @@ def main(manifest_path: str, *, seed: int, quick: bool, workdir: str | None, thr
         "daemon_code_sha256": code_sha, "workspace": ws.root, "rewrites": ws.rewrites,
         "environment": {"python": sys.version.split()[0], "kernel": os.uname().release,
                         "machine": os.uname().machine, "strace": bool(_strace()),
-                        "systemd_analyze": bool(shutil.which("systemd-analyze", path="/usr/bin:/bin"))},
+                        "systemd_analyze": bool(shutil.which("systemd-analyze", path=proc.SYSTEM_PATH))},
         "checks": [asdict(c) for c in checks],
     }
     report_path = os.path.join(ws.root, "battery-report.json")

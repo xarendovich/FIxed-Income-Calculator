@@ -144,7 +144,7 @@ class GitHardeningTests(unittest.TestCase):
         self.assertNotIn("safe.directory=*", argv)
 
 
-@unittest.skipUnless(shutil.which("git", path="/usr/bin:/bin"), "git not installed")
+@unittest.skipUnless(shutil.which("git", path=proc.SYSTEM_PATH), "git not installed")
 class GitHistoryIntegrityTests(unittest.TestCase):
     """The Observer's WBS 2.5 hardened Git profile (A1, evidence E1-E3), adopted for ctx.git
     after a cross-check against the Spark handoffs: each case was reproduced against r3."""
@@ -154,7 +154,7 @@ class GitHistoryIntegrityTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.repo = os.path.join(self.tmp, "r")
-        self.env = {"PATH": "/usr/bin:/bin", "HOME": self.tmp, "GIT_CONFIG_GLOBAL": "/dev/null",
+        self.env = {"PATH": proc.SYSTEM_PATH, "HOME": self.tmp, "GIT_CONFIG_GLOBAL": "/dev/null",
                     "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
                     "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
         self.g("init", "-q", "-b", "main", self.repo, cwd=self.tmp)
@@ -209,7 +209,7 @@ class GitHistoryIntegrityTests(unittest.TestCase):
         self.assertEqual(self.ctx_git("rev-list", "--count", "HEAD").stdout.strip(), "3")
 
 
-@unittest.skipUnless(shutil.which("git", path="/usr/bin:/bin"), "git not installed")
+@unittest.skipUnless(shutil.which("git", path=proc.SYSTEM_PATH), "git not installed")
 class GitInjectionRuntimeTests(unittest.TestCase):
     """End to end: the r2 injection ran `id` through ctx.git(["-c", "alias.y=!..."]).
     Now the call is refused, counted as a violation, and the daemon fails closed (78)."""
@@ -520,7 +520,7 @@ def _rebuild(name, stamp, sections, limit):
 class CliRobustnessTests(unittest.TestCase):
     def cli(self, *args):
         return subprocess.run([sys.executable, "-I", "-B", ENTRY, *args], capture_output=True, text=True,
-                              timeout=120, env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent", "LANG": "C.UTF-8"})
+                              timeout=120, env={"PATH": proc.SYSTEM_PATH, "HOME": "/nonexistent", "LANG": "C.UTF-8"})
 
     def test_verify_with_a_bad_manifest_reports_instead_of_crashing(self):
         tmp = tempfile.mkdtemp()

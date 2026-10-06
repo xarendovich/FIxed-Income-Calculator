@@ -9,7 +9,7 @@ import unicodedata
 import unittest
 
 from helpers import EXAMPLE, ENTRY, FIXTURES, ROOT
-from spark_daemon import manifest, purity, unitgen
+from spark_daemon import manifest, proc, purity, unitgen
 
 
 class UnitgenTests(unittest.TestCase):
@@ -32,6 +32,41 @@ class UnitgenTests(unittest.TestCase):
         self.assertIn("WARNING: user unit", text)
         self.assertIn("WantedBy=default.target", text)
         self.assertNotIn("User=", text)
+
+    def test_a_required_path_becomes_a_start_condition(self):
+        # r4.8 (from the first pilot): with a locked drive, a daemon whose output is on it must
+        # be skipped by systemd, not stopped fail-closed (78, never restarted).
+        m = manifest.load(os.path.join(EXAMPLE, "manifest.json"))
+        marker = "/mnt/project/.volume-marker"
+        text = unitgen.generate(m, root=ROOT, require_paths=[marker])
+        unit_section = text.split("[Service]")[0]
+        self.assertIn(f"ConditionPathExists={marker}\n", unit_section)
+        self.assertEqual(unitgen.lint(text), [])
+        self.assertNotIn("ConditionPathExists", unitgen.generate(m, root=ROOT))
+        plan = unitgen.install_plan(m, root=ROOT, require_paths=[marker])
+        self.assertIn(f"--require-path {marker}", plan)
+        with self.assertRaises(unitgen.UnitError):
+            unitgen.generate(m, root=ROOT, require_paths=["relative/marker"])
+
+    def test_part_of_binds_the_unit_to_another(self):
+        # r4.8 (from the first pilot): an open ledger keeps a drive busy, so a daemon writing to
+        # a drive another unit owns must stop before it and start with it, never at boot.
+        m = manifest.load(os.path.join(EXAMPLE, "manifest.json"))
+        owner = "project-stack.service"
+        text = unitgen.generate(m, root=ROOT, part_of=owner)
+        unit_section = text.split("[Service]")[0]
+        self.assertIn(f"PartOf={owner}\n", unit_section)
+        self.assertIn(f"After={owner}\n", unit_section)
+        self.assertIn(f"WantedBy={owner}\n", text)
+        self.assertNotIn("multi-user.target", text)
+        self.assertEqual(unitgen.lint(text), [])
+        self.assertNotIn("PartOf=", unitgen.generate(m, root=ROOT))
+        plan = unitgen.install_plan(m, root=ROOT, part_of=owner)
+        self.assertIn(f"--part-of {owner}", plan)
+        self.assertIn(f"starts and stops with {owner}", plan)
+        for bad in ("project-stack", "a b.service", "x.service\nExecStart=/bin/sh"):
+            with self.assertRaises(unitgen.UnitError):
+                unitgen.generate(m, root=ROOT, part_of=bad)
 
     def test_install_plan_is_text_only(self):
         m = manifest.load(os.path.join(EXAMPLE, "manifest.json"))
@@ -96,7 +131,7 @@ class BatteryTests(unittest.TestCase):
     def run_battery(self, manifest_path):
         return subprocess.run([sys.executable, "-I", "-B", ENTRY, "battery", "--manifest", manifest_path,
                                "--quick"], capture_output=True, text=True, timeout=300,
-                              env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent", "LANG": "C.UTF-8"})
+                              env={"PATH": proc.SYSTEM_PATH, "HOME": "/nonexistent", "LANG": "C.UTF-8"})
 
     def test_example_passes_or_is_incomplete_never_fails(self):
         p = self.run_battery(os.path.join(EXAMPLE, "manifest.json"))

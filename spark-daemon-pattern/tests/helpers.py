@@ -15,6 +15,8 @@ EXAMPLE = os.path.join(ROOT, "examples", "meminfo-watch")
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+from spark_daemon.proc import SYSTEM_PATH  # noqa: E402  (needs ROOT on sys.path)
+
 
 class Sandbox:
     """A disposable HOME with a copy of one daemon, run in child processes."""
@@ -41,7 +43,7 @@ class Sandbox:
         self.output = os.path.join(self.home, out[2:]) if out.startswith("~/") else out
 
     def env(self, **extra):
-        env = {"HOME": self.home, "SPARK_DAEMON_HOME": self.home, "PATH": "/usr/bin:/bin",
+        env = {"HOME": self.home, "SPARK_DAEMON_HOME": self.home, "PATH": SYSTEM_PATH,
                "LANG": "C.UTF-8", "SPARK_DAEMON_TEST": "1", "SPARK_DAEMON_TEST_INTERVAL_MS": "100",
                "PYTHONDONTWRITEBYTECODE": "1"}
         env.update(extra)

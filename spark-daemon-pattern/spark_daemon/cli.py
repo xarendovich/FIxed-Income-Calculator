@@ -48,6 +48,10 @@ def main(argv=None) -> int:
     p.add_argument("--manifest", required=True)
     p.add_argument("--python", default="/usr/bin/python3")
     p.add_argument("--plan", action="store_true", help="print the install plan instead of the unit")
+    p.add_argument("--require-path", action="append", default=[],
+                   help="a path that must exist for the unit to start (ConditionPathExists=); repeatable")
+    p.add_argument("--part-of", default=None,
+                   help="start and stop with this unit (PartOf=, After=, WantedBy=)")
 
     p = sub.add_parser("run", help="run the daemon in the foreground (systemd calls this)")
     p.add_argument("--manifest", required=True)
@@ -154,9 +158,11 @@ def main(argv=None) -> int:
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         try:
             if args.plan:
-                print(unitgen.install_plan(m, root=root, python=args.python))
+                print(unitgen.install_plan(m, root=root, python=args.python,
+                                           require_paths=args.require_path, part_of=args.part_of))
             else:
-                print(unitgen.generate(m, root=root, python=args.python), end="")
+                print(unitgen.generate(m, root=root, python=args.python,
+                                       require_paths=args.require_path, part_of=args.part_of), end="")
         except unitgen.UnitError as e:
             print(f"unit: {e}", file=sys.stderr)
             return EXIT_USAGE

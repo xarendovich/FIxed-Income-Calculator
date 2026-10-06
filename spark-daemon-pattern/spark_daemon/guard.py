@@ -19,7 +19,7 @@ import stat
 import sys
 import types
 
-from . import KNOWN_OUTPUT_ENTRIES, QUARANTINE_DIR, TMP_DIR, TMP_PREFIX
+from . import KNOWN_OUTPUT_ENTRIES, QUARANTINE_DIR, TMP_DIR, TMP_PREFIX, proc
 from .paths import expand, within
 
 
@@ -65,7 +65,7 @@ class Policy:
     def __init__(self, manifest, notify_socket=None):
         commands = {}
         for name in manifest.commands:
-            found = shutil.which(name, path="/usr/bin:/bin")
+            found = shutil.which(name, path=proc.SYSTEM_PATH)
             if found:
                 commands[name] = os.path.realpath(found)
         values = {

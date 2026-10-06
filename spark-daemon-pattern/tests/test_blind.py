@@ -1,6 +1,7 @@
 """Blind period (r3.5): ctx.unsettled(), blind_limit_seconds and SENSE_BLIND, and the unit
 never restarting a fail-closed exit."""
 
+import ast
 import importlib.util
 import json
 import os
@@ -470,7 +471,9 @@ class NoRestartTests(unittest.TestCase):
         # r3.9 (HF-30): six Git calls per worktree cycle since r3.5, each up to step_timeout.
         m = manifest.load(os.path.join(ROOT, "examples", "git-watch", "manifest.json"))
         with open(os.path.join(ROOT, "examples", "git-watch", "daemon.py")) as fh:
-            calls = fh.read().count("_git(ctx, [")
+            tree = ast.parse(fh.read())
+        calls = sum(1 for node in ast.walk(tree)     # counted by the parser, so line wrapping
+                    if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_git")
         self.assertEqual(calls, 6)
         self.assertLessEqual(calls * m.step_timeout_seconds, m.watchdog_seconds // 2)
 
