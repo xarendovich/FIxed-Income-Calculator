@@ -142,8 +142,8 @@ class BatteryTests(unittest.TestCase):
         with open(report_path) as fh:
             report = json.load(fh)
         ids = [c["id"] for c in report["checks"]]
-        self.assertEqual(ids[-4:], ["DB-18", "DB-20", "DB-24", "DB-25"])   # DB-19, DB-21 to 23 reserved
-        self.assertEqual(len(ids), 21)
+        self.assertEqual(ids[-5:], ["DB-18", "DB-20", "DB-22", "DB-24", "DB-25"])   # DB-19, 21, 23 reserved
+        self.assertEqual(len(ids), 22)
         self.assertEqual((report["profile"], report["qualifying"]), ("battery", False))   # --quick
         self.assertEqual(report["schema"], "spark-daemon-battery/1")
 

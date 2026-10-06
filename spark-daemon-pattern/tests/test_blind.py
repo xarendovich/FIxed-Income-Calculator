@@ -215,22 +215,26 @@ class BlindPeriodTests(unittest.TestCase):
         self.assertEqual(records["DAEMON_START"]["clock_basis"], "fresh")
 
     def test_across_a_reboot_the_wall_clock_is_used_and_a_backward_one_assumes_the_worst(self):
-        from spark_daemon import runtime
-        other_boot = runtime._AcceptEvidence()
-        other_boot.anchor = ("00000000-0000-0000-0000-000000000000", 5)
-        past = "2000-01-01T00:00:00.000000Z"
-        future = "2999-01-01T00:00:00.000000Z"
-        seconds, basis = runtime._inherited_blindness(3, other_boot, runtime._boot_id(), past, 60)
+        # r4.11 (R-4): the rule lives in semantics.blindness, shared by start-up and status.
+        from spark_daemon import runtime, semantics
+        now = runtime._now(runtime._boot_id())
+
+        def other_boot(last_accepted_utc, records=3):
+            ev = semantics.AcceptEvidence()
+            ev.records, ev.last_accepted_utc = records, last_accepted_utc
+            ev.anchor = ("00000000-0000-0000-0000-000000000000", 5)
+            return ev
+        seconds, basis = semantics.blindness(other_boot("2000-01-01T00:00:00.000000Z"), now, 60)
         self.assertEqual(basis, "wall")
         self.assertGreater(seconds, 60)
-        self.assertEqual(runtime._inherited_blindness(3, other_boot, runtime._boot_id(), future, 60),
+        self.assertEqual(semantics.blindness(other_boot("2999-01-01T00:00:00.000000Z"), now, 60),
                          (60.0, "worst_case"))
-        self.assertEqual(runtime._inherited_blindness(0, other_boot, runtime._boot_id(), None, 60), (0.0, "fresh"))
+        self.assertEqual(semantics.blindness(other_boot(None, records=0), now, 60), (0.0, "fresh"))
 
     def test_an_event_after_the_last_stamp_is_anchored_at_that_stamp(self):
         # A daemon event carries no boot time; the preceding stamp bounds it from below (safe side).
-        from spark_daemon import runtime
-        ev = runtime._AcceptEvidence()
+        from spark_daemon import semantics
+        ev = semantics.AcceptEvidence()
         boot = "11111111-1111-1111-1111-111111111111"
         ev.observe({"event_type": "DAEMON_START", "timestamp_utc": "t0",
                     "payload": {"boot_id": boot, "boottime_ms": 1000, "blind_since_boottime_ms": 400}})

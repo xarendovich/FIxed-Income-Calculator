@@ -12,7 +12,7 @@ a new ID (PD-78).
 Profiles:
   validate   DB-01 DB-02 DB-24 DB-25     static: no process is started (milliseconds)
   precheck   validate + DB-03 DB-04      a short confined run (seconds); offline, no extra tools
-  battery    every registered check      the qualification profile (minutes)
+  battery    every registered check      the qualification profile (minutes), DB-22 included
 
 Check states: PASS, FAIL, UNKNOWN (the evidence could not be gathered, for example strace is
 missing), N/A (does not apply to this daemon), SKIPPED (not run, because a static check it
@@ -232,8 +232,8 @@ def _registry():
         Spec("DB-18", "DAEMON_START.landlock matches host and manifest", "run", lambda j, c: b.db18(j.ws, c)),
         # DB-19 is reserved for the direct cgroup memory reading (PD-76).
         Spec("DB-20", "observes within a blind limit", "run", lambda j, c: b.db20(j.ws, c)),
-        # DB-21 to DB-23 are reserved for the budget table, the independent verifier and the
-        # worst-case fixtures.
+        # DB-21 is reserved for the budget table and DB-23 for the worst-case fixtures.
+        Spec("DB-22", "a second, independent verifier agrees", "run", lambda j, c: b.db22(j.ws, c)),
         Spec("DB-24", "candidate envelope matches the files", "static", _db24),
         Spec("DB-25", "generated unit carries every required directive", "static", _db25),
     )

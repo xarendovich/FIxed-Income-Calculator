@@ -52,7 +52,7 @@ moment the current blind stretch began. A restart in the same boot measures on t
 a reboot only the wall clock is left: it is used when it moved forward, and when it did not the
 runtime assumes the worst, blind at the limit, which leaves the one reacquisition cycle.
 DAEMON_START and SENSE_BLIND record the clock_basis used: "boottime", "wall", "worst_case" or
-"fresh".
+"fresh". Since r4.11 (R-4) that rule is semantics.blindness, the one function `status` also uses.
 
 Three additions (r2). Landlock (spark_daemon/landlock.py) is a fourth, kernel-enforced
 layer next to purity.py, the audit hook and the systemd unit; see that module's docstring
@@ -80,9 +80,8 @@ import sys
 import time
 
 from . import (DIGEST_NAME, EXIT_ALREADY_RUNNING, EXIT_LEDGER_CORRUPT, EXIT_OK, EXIT_POLICY,
-               RESERVED_EVENT_TYPES,
                EXIT_SENSE_BLIND, EXIT_UNCERTAIN_COMMIT, EXIT_USAGE, LOCK_NAME, TMP_DIR, TMP_PREFIX, VERSION)
-from . import guard, landlock, ledger, manifest as manifest_mod, notify as notify_mod, purity, render
+from . import guard, landlock, ledger, manifest as manifest_mod, notify as notify_mod, purity, render, semantics
 from .canonical import CanonicalError, sha256_hex, to_json_value
 from .context import Context, Unsettled, utc_now
 
@@ -261,7 +260,7 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
         return EXIT_USAGE
 
     try:
-        evidence = _AcceptEvidence()
+        evidence = semantics.AcceptEvidence()
         scan, quarantine = ledger.recover(out, m.name, m.ledger.record_max_bytes, on_record=evidence.observe)
     except ledger.LedgerCorrupt as e:
         log(str(e))
@@ -289,8 +288,8 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
             ended_cleanly = scan.last_event_type == "DAEMON_STOP"
         # PD-70: how long this daemon has already been blind, carried across the restart, and on
         # which clock (r4.5, HF-34).
-        since_utc = None if scan.records == 0 else (evidence.last_accepted_utc or evidence.first_start_utc)
-        inherited, clock_basis = _inherited_blindness(scan.records, evidence, boot_id, since_utc, blind_limit)
+        # r4.11 (R-4): the same function `status` uses (semantics.py), fed the same verified records.
+        inherited, clock_basis = semantics.blindness(evidence, _now(boot_id), blind_limit)
         start_boottime_ms = _boottime_ms()
         recent.append(writer.append("DAEMON_START", {
             "skeleton_version": VERSION,
@@ -497,41 +496,6 @@ class _Blind:
         return now - self.since
 
 
-class _AcceptEvidence:
-    """The latest evidence in the ledger that a cycle was accepted (r4.0, PD-70). Read in chain
-    order, never by comparing timestamps, so a wall-clock step cannot reorder it (U-4)."""
-
-    def __init__(self):
-        self.last_accepted_utc = None
-        self.first_start_utc = None
-        self.anchor = None          # (boot_id, blind_since_boottime_ms); r4.5, HF-34
-        self._stamp = None          # (boot_id, boottime_ms) of the latest boot-stamped record
-
-    def observe(self, record):
-        """r4.5 (HF-34): also tracks the boot-time anchor of that evidence. A start, heartbeat or
-        stop states blind_since_boottime_ms exactly. A daemon event states only that a cycle was
-        accepted after the latest boot-stamped record, so that record's boottime_ms stands in:
-        it can over-state blindness by at most one heartbeat interval, in the safe direction."""
-        event_type, payload = record["event_type"], record["payload"]
-        if event_type in ("DAEMON_START", "DAEMON_HEARTBEAT", "DAEMON_STOP") and isinstance(payload, dict):
-            boot, now_ms, since_ms = (payload.get("boot_id"), payload.get("boottime_ms"),
-                                      payload.get("blind_since_boottime_ms"))
-            if isinstance(boot, str) and isinstance(now_ms, int) and isinstance(since_ms, int):
-                self._stamp, self.anchor = (boot, now_ms), (boot, since_ms)
-            else:
-                self._stamp = self.anchor = None       # an older record: no boot-time evidence
-        if event_type == "DAEMON_START":
-            if self.first_start_utc is None:
-                self.first_start_utc = record["timestamp_utc"]
-        elif event_type in ("DAEMON_HEARTBEAT", "DAEMON_STOP"):
-            value = payload.get("last_accepted_utc") if isinstance(payload, dict) else None
-            if isinstance(value, str):
-                self.last_accepted_utc = value
-        elif event_type not in RESERVED_EVENT_TYPES:
-            self.last_accepted_utc = record["timestamp_utc"]     # events come only from accepted cycles
-            self.anchor = self._stamp                             # accepted no earlier than that stamp
-
-
 def _boot_id():
     """The kernel's identifier for this boot, or None where it cannot be read."""
     try:
@@ -554,26 +518,9 @@ def _boot_stamp(boot_id, blind_seconds) -> dict:
             "blind_since_boottime_ms": now_ms - int(blind_seconds * 1000)}
 
 
-def _inherited_blindness(records, evidence, boot_id, since_utc, limit):
-    """Seconds of blindness a start inherits, and the clock that measured it (r4.5, HF-34)."""
-    if records == 0 or since_utc is None:
-        return 0.0, "fresh"
-    if boot_id is not None and evidence.anchor is not None and evidence.anchor[0] == boot_id:
-        return max(0.0, (_boottime_ms() - evidence.anchor[1]) / 1000), "boottime"
-    wall = _wall_seconds_since(since_utc)
-    if wall is None or wall < 0:
-        return float(limit), "worst_case"      # the wall clock went back: elapsed time is unknown
-    return wall, "wall"
-
-
-def _wall_seconds_since(utc_text):
-    """Signed wall-clock seconds since a ledger timestamp (negative if it lies in the future), or
-    None if it cannot be read. Used only across a reboot, where no shared clock exists."""
-    try:
-        then = datetime.datetime.strptime(utc_text, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=datetime.timezone.utc)
-    except (TypeError, ValueError):
-        return None
-    return (datetime.datetime.now(datetime.timezone.utc) - then).total_seconds()
+def _now(boot_id):
+    """The clock readings the shared interpretation takes (semantics.Now)."""
+    return semantics.Now(boot_id, _boottime_ms(), datetime.datetime.now(datetime.timezone.utc))
 
 
 def _cleared(writer, streak, ended_by):

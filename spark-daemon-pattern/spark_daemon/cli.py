@@ -1,7 +1,7 @@
 """Command line.
 
 Authoring and handoff: describe | schema | scaffold | envelope | validate | precheck
-Evidence and operation: battery | qualified | unit (a preview) | run | verify
+Evidence and operation: battery | qualified | unit (a preview) | run | verify | status
 Internal (the battery's child processes): probe-policy | probe-landlock | probe-digest
 """
 
@@ -63,6 +63,10 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("verify", help="verify a daemon's ledger read-only and print its chain head")
     p.add_argument("--manifest", required=True)
+
+    p = sub.add_parser("status", help="a daemon's state from its ledger, verified independently (r4.11)")
+    p.add_argument("--manifest", required=True)
+    p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("battery", help="run the conformance battery in a disposable workspace")
     p.add_argument("--manifest", required=True)
@@ -194,6 +198,30 @@ def main(argv=None) -> int:
             return EXIT_USAGE
         return runtime.run(args.manifest, max_cycles=args.max_cycles,
                            expect=given if all(given.values()) else None)
+
+    if args.command == "status":
+        from . import EXIT_FLAGGED, status
+        from . import manifest as manifest_mod
+        try:
+            report = status.status(args.manifest)
+        except manifest_mod.ManifestError as e:
+            for problem in e.problems:
+                print(f"manifest: {problem}", file=sys.stderr)
+            return EXIT_USAGE
+        if args.json:
+            print(json.dumps(report, indent=2, ensure_ascii=False))
+        else:
+            print(f"{report['daemon']}: {report['state']}" + (f" ({report['reason']})" if report.get("reason") else ""))
+            print(f"integrity: {report['integrity']}")
+            if report["integrity"] == "CHAIN_INTACT":
+                print(f"blind for {report['blind_ms'] / 1000:.1f} s of {report['blind_limit_seconds']} s "
+                      f"(measured on the {report['clock_basis']} clock)")
+                for gap in report["gaps"]:
+                    print(f"not watching from {gap['from']} to {gap['to']}"
+                          + ("" if gap["previous_run_ended_cleanly"] else " (after an unclean end)"))
+        if report["integrity"] == "CORRUPT":
+            return EXIT_FAILED
+        return EXIT_OK if report["state"] == "observing" else EXIT_FLAGGED
 
     if args.command == "verify":
         from . import LEDGER_NAME, ledger, manifest

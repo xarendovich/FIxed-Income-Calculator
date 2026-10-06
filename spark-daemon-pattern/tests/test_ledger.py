@@ -90,6 +90,17 @@ class LedgerTests(unittest.TestCase):
         self.put(lines)
         self.assertCorrupt("NOT_CANONICAL")
 
+    def test_a_boolean_seq_is_not_a_sequence_number(self):
+        # r4.11 (HF-38): True == 1 in Python, and canonical re-encoding keeps `true` as `true`, so a
+        # first record whose seq was the JSON boolean true verified as seq 1. Found by writing the
+        # independent verifier (verifier/ledger_verify.py), which had the same blind spot.
+        self.write(1)
+        record = json.loads(self.lines()[0])
+        record["seq"] = True
+        from spark_daemon.canonical import canonical_bytes
+        self.put([canonical_bytes(record)])
+        self.assertCorrupt("SEQUENCE")
+
     def test_foreign_daemon(self):
         self.write(3)
         with self.assertRaises(ledger.LedgerCorrupt) as ctx:

@@ -26,12 +26,13 @@ RESULT is PASS only when nothing FAILs and nothing is UNKNOWN; otherwise FAIL, o
  DB-17 Landlock still blocks a forbidden operation with the audit hook in record-only mode (r2)
  DB-18 DAEMON_START.landlock is present and matches this host's ABI and the manifest's gaps (r2)
  DB-20 the daemon observes: accepted cycles, and no SENSE_BLIND within a short blind limit (r4.5)
+ DB-22 a second, independent ledger verifier agrees, on the daemon's ledger and damaged copies (r4.11)
 
 DB-24 the candidate envelope matches the files                (static; r4.11, judge.py)
 DB-25 the generated unit carries every required directive      (static; r4.11, judge.py)
 
 DB-19 is reserved for the direct cgroup memory reading (PD-76; the v0.1 line's registry), and
-DB-21 to DB-23 for the planned budget table, independent verifier and worst-case fixtures. A
+DB-21 and DB-23 for the planned budget table and worst-case fixtures. A
 check whose meaning changes gets a new ID instead of an edit (PD-78). The list, the profiles
 and the verdict rule live in judge.py; this module implements the checks that run the daemon.
 """
@@ -537,6 +538,63 @@ def db20(ws, c, cycles=12, limit_intervals=5):
         c.state = "PASS"
         c.evidence = (f"{accepted} accepted and {missed} unsettled or failed cycle(s) across {len(beats)} "
                       f"heartbeat(s); no SENSE_BLIND within a {limit_ms} ms limit")
+
+
+def corrupted_copies(lines):
+    """Damaged versions of a verified ledger (a list of lines with their newlines), named, with
+    the (category, seq) both verifiers must report. Needs at least two lines."""
+    first, second = lines[0], lines[1]
+    out = []
+    at = first.find(b'"run_id":"') + len(b'"run_id":"')
+    if at > len(b'"run_id":"'):
+        digit = b"0" if first[at:at + 1] != b"0" else b"1"
+        out.append(("an earlier record changed", [first[:at] + digit + first[at + 1:]] + lines[1:], ("LINK", 2)))
+    comma = second.find(b",")
+    out.append(("a record re-encoded", [first, second[:comma + 1] + b" " + second[comma + 1:]] + lines[2:],
+                ("NOT_CANONICAL", 2)))
+    if len(lines) > 2:
+        out.append(("a record removed", [first] + lines[2:], ("SEQUENCE", 2)))
+    out.append(("seq written as true", [first.replace(b'"seq":1,', b'"seq":true,', 1)] + lines[1:],
+                ("SEQUENCE", 1)))
+    out.append(("an unparseable line", [first, b"{not json\n"] + lines[2:], ("UNPARSEABLE", 2)))
+    return out
+
+
+def db22(ws, c):
+    """r4.11 (R-4; B-6, U-7): the ledger, verified by a second implementation. The skeleton's
+    verifier and verifier/ledger_verify.py, which shares no code with it and encodes RFC 8785 by
+    hand, must agree on this daemon's own ledger and on damaged copies of it. Writing that second
+    verifier found HF-38 (a boolean seq verified as 1)."""
+    from . import status
+    ws.reset_output()
+    p = run_proc(ws.run_cmd(cycles=4), ws.env())
+    if p.code != 0:
+        c.state, c.evidence = "FAIL", f"run exited {p.code}"
+        return
+    name, limit = ws.m.name, ws.m.ledger.record_max_bytes
+    problems = [f"own ledger: {d}" for d in status.cross_check(ws.ledger, name, limit)]
+    clean = status.primary_outcome(ws.ledger, name, limit)
+    with open(ws.ledger, "rb") as fh:
+        lines = fh.readlines()
+    if len(lines) < 2:
+        c.state, c.evidence = "UNKNOWN", f"only {len(lines)} record(s): nothing to damage"
+        return
+    copies = corrupted_copies(lines)
+    for i, (label, damaged, expected) in enumerate(copies):
+        path = os.path.join(ws.root, f"db22-{i}.jsonl")
+        with open(path, "wb") as fh:
+            fh.write(b"".join(damaged))
+        problems += [f"{label}: {d}" for d in status.cross_check(path, name, limit)]
+        got = status.primary_outcome(path, name, limit)
+        found = (got.get("break") or {}).get("category"), (got.get("break") or {}).get("seq")
+        if found != expected:
+            problems.append(f"{label}: expected {expected[0]} at seq {expected[1]}, got {found}")
+    if problems:
+        c.state, c.evidence = "FAIL", "; ".join(problems[:4])
+    else:
+        c.state = "PASS"
+        c.evidence = (f"both verifiers agree: own ledger intact to seq {clean['head_seq']} (head "
+                      f"{clean['head_sha256'][:16]}), and the same break on {len(copies)} damaged copies")
 
 
 def db15(ws, c, threshold, unit_options=None):

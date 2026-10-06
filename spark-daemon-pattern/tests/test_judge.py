@@ -22,7 +22,7 @@ class RegistryTests(unittest.TestCase):
     def test_ids_are_unique_and_reserved_ids_stay_free(self):
         ids = sorted(judge.registry())
         self.assertTrue(all(re.fullmatch(r"DB-\d\d", i) for i in ids), ids)
-        for reserved in ("DB-19", "DB-21", "DB-22", "DB-23"):
+        for reserved in ("DB-19", "DB-21", "DB-23"):
             self.assertNotIn(reserved, ids)
 
     def test_profiles_nest_and_the_battery_runs_everything(self):

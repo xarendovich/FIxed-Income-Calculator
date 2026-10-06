@@ -92,7 +92,9 @@ def verify_line(body: bytes, expected_seq: int, expected_prev: str, daemon: str,
             raise LedgerCorrupt("NOT_CANONICAL", expected_seq, offset)
     except CanonicalError:
         raise LedgerCorrupt("NOT_CANONICAL", expected_seq, offset) from None
-    if record["seq"] != expected_seq:
+    # r4.11 (HF-38): `type(...) is int`, because True == 1 in Python: a record whose seq was the
+    # JSON boolean true verified as seq 1. Found by writing the independent verifier.
+    if type(record["seq"]) is not int or record["seq"] != expected_seq:
         raise LedgerCorrupt("SEQUENCE", expected_seq, offset)
     if record["prev_sha256"] != expected_prev:
         raise LedgerCorrupt("LINK", expected_seq, offset)
