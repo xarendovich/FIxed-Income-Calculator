@@ -1,5 +1,5 @@
 {
-  "manifest_schema": "spark-daemon-manifest/2",
+  "manifest_schema": "spark-daemon-manifest/3",
   "name": "meminfo-watch",
   "version": "0.1.0",
   "purpose": "Records when unified-memory headroom moves between bands, from /proc/meminfo and memory pressure (PSI).",
@@ -8,12 +8,10 @@
   "reads": ["/proc/meminfo", "/proc/pressure/memory"],
   "commands": [],
   "output_dir": "~/spark-daemons/meminfo-watch",
-  "deny": [],
   "network": {"mode": "none"},
   "run_as": {"unit": "system", "user": "spark-meminfo"},
   "resources": {"cpu_weight": 10, "cpu_budget_bp": 100, "memory_max_mb": 64, "tasks_max": 8, "io_class": "idle"},
-  "watchdog_seconds": 90,
-  "step_timeout_seconds": 10,
+  "cycle_budget_seconds": 40,
   "blind_limit_seconds": 1800,
   "ledger": {"record_max_bytes": 8192, "event_types": ["MEMORY_OBSERVATION_BASELINE", "MEMORY_BAND_CHANGED"]},
   "digest": {"enabled": true, "max_bytes": 8192}

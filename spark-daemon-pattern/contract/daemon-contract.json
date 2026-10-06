@@ -1,13 +1,13 @@
 {
   "schema": "spark-daemon-contract/1",
-  "contract_version": "3.1.0",
-  "contract_sha256": "2d00dda2c1b1d389081f0d354341588106722b61dbf27a5b0791dfe8324ee159",
+  "contract_version": "4.0.0",
+  "contract_sha256": "dfdb9f1b484d842d4e4f5d1684917371a7106b0bd68ebd06d388ab88f49b8ea6",
   "skeleton_version": "0.3.0",
   "contract": {
     "manifest": {
-      "schema_id": "urn:spark:schema:spark-daemon-manifest:2",
-      "manifest_schema": "spark-daemon-manifest/2",
-      "json_schema_sha256": "7a0d1049d71b6c78f6448e575a48e826f64d6e83de14ff71ed1226034b04f81c",
+      "schema_id": "urn:spark:schema:spark-daemon-manifest:3",
+      "manifest_schema": "spark-daemon-manifest/3",
+      "json_schema_sha256": "821e5588c355318f0ffe380f784373f6da990473d525632229c2d98fcaad17fd",
       "max_bytes": 65536,
       "base_deny": [
         "~/spark-core/data",
@@ -183,12 +183,12 @@
         ]
       },
       "cross_field_rules": [
-        "step_timeout_seconds must be at most half of watchdog_seconds",
+        "cycle_budget_seconds must be at most half of blind_limit_seconds",
         "blind_limit_seconds must be at least 3 x trigger.interval_seconds",
         "run_as.user is required for unit 'system', must not be 'root', and is refused for unit 'user'",
         "paths are compared after expanding '~' (SPARK_DAEMON_HOME, else HOME) and resolving symlinks",
-        "every read path must lie outside every denied path (base deny plus the manifest's deny)",
-        "output_dir must not lie inside, or contain, ~/spark-core, ~/spark-governance, a base-deny path or a path in the manifest's deny",
+        "every read path must lie outside every base-deny path, and must not contain one (no gaps: the kernel's grant is the whole policy)",
+        "output_dir must not lie inside, or contain, ~/spark-core, ~/spark-governance or a base-deny path",
         "output_dir must not overlap any read path (a daemon never observes its own output)"
       ]
     },
@@ -571,13 +571,14 @@
       "accepted": "sense() returned a snapshot, and decide()'s events were validated and committed (zero events is still accepted); start-up counts as accepted",
       "unsettled": "sense() returned ctx.unsettled(reason): the cycle is abandoned before decide(), with no event, no DAEMON_ERROR and no new digest",
       "failed": "sense() or decide() raised, or returned invalid data: DAEMON_ERROR (repeats collapsed)",
+      "budget": "one monotonic deadline per cycle, cycle_budget_seconds from its start: every ctx call gets the time left, and an alarm interrupts sense() and decide() at the deadline, including pure-Python loops; the cycle then fails with DAEMON_ERROR category CYCLE_BUDGET_EXCEEDED. The ledger write is never interrupted. The digest gets what is left; past it the previous digest stays",
       "blind_limit": "no accepted cycle for blind_limit_seconds (monotonic clock), whether from unsettled or failed cycles: DAEMON_ERROR category SENSE_BLIND with blind_ms, limit_ms, unsettled_cycles, failed_cycles, last_cause and last_cause_kind; then exit 78",
       "watchdog": "pinged from the main loop throughout, including unsettled and failed cycles within the limit; the limit, not the watchdog, catches a daemon that sees nothing",
       "across_restarts": "the blind clock survives restarts (PD-70): at start-up it begins at the latest evidence of an accepted cycle in the verified ledger (a daemon event, or the last_accepted_utc of a heartbeat or clean stop). Within one boot it is measured on CLOCK_BOOTTIME (boot_id, boottime_ms and blind_since_boottime_ms in DAEMON_START, DAEMON_HEARTBEAT and DAEMON_STOP), so no wall-clock step moves it; across a reboot on the wall clock, and if that went back, blind at the limit is assumed; DAEMON_START and SENSE_BLIND record the clock_basis; a fresh ledger starts at zero. A restart that inherits more than the limit gets one reacquisition cycle, then SENSE_BLIND without a fresh countdown. Neither an operator restart nor a clean stop resets it; only an accepted cycle does",
       "heartbeat": "DAEMON_HEARTBEAT every blind_limit_seconds / 2: mode (observing or blind), last_accepted_utc (null before the first accepted cycle), blind_ms, and the accepted, unsettled and failed cycle counts since the previous heartbeat, and the boot stamp (boot_id, boottime_ms, blind_since_boottime_ms)",
       "blind_forester": {
         "observe": "fail closed: SENSE_BLIND, exit 78, never restarted (the only class in this contract)",
-        "active_classes": "a pre-validated survival loop (PD-01.9) is not available in contract 3.x; it requires an Act-family class, the supervisor/worker split (PD-72) and pre-authorized survival actions"
+        "active_classes": "a pre-validated survival loop (PD-01.9) is not available in contract 4.x; it requires an Act-family class, the supervisor/worker split (PD-72) and pre-authorized survival actions"
       }
     },
     "git": {
@@ -730,7 +731,7 @@
       "65": "corrupt ledger; nothing changed",
       "70": "uncertain ledger commit; recovery decides on restart",
       "73": "another instance holds the lock",
-      "78": "unsafe output directory, Landlock refused, a policy violation, or SENSE_BLIND (no accepted cycle within blind_limit_seconds): fail closed, needs a human",
+      "78": "unsafe output directory, Landlock refused, a policy violation, SENSE_BLIND (no accepted cycle within blind_limit_seconds), or a start that is not qualified (no battery PASS digests, or files changed since): fail closed, needs a human. The reason is the ledger's DAEMON_ERROR category or the log",
       "never_restarted": [
         2,
         65,
@@ -739,42 +740,95 @@
       ]
     },
     "evidence": {
-      "validate": {
-        "schema": "spark-daemon-validate/1",
-        "cost": "milliseconds",
-        "checks": "manifest schema and cross-field rules, purity, candidate envelope"
+      "checks": {
+        "DB-01": "manifest validates",
+        "DB-02": "purity check",
+        "DB-03": "confinement",
+        "DB-04": "ledger integrity and provenance",
+        "DB-05": "crash and restart",
+        "DB-06": "torn-tail quarantine",
+        "DB-07": "refuses a corrupt ledger",
+        "DB-08": "fsync failure",
+        "DB-09": "disk-full failure",
+        "DB-10": "digest containment",
+        "DB-11": "notify protocol",
+        "DB-12": "single instance and SIGTERM",
+        "DB-13": "audit hook blocks forbidden operations",
+        "DB-14": "resource budget",
+        "DB-15": "unit hardening",
+        "DB-16": "read-only verification",
+        "DB-17": "Landlock blocks with the audit hook record-only",
+        "DB-18": "DAEMON_START.landlock matches host and manifest",
+        "DB-20": "observes within a blind limit",
+        "DB-22": "a second, independent verifier agrees",
+        "DB-24": "candidate envelope matches the files",
+        "DB-25": "generated unit: every required directive, timings from the cycle budget"
       },
-      "precheck": {
-        "schema": "spark-daemon-precheck/1",
-        "cost": "about 2 seconds",
-        "checks": "validate, plus a short confined run under Landlock with the audit hook recording, ledger provenance, and unit lint"
+      "states": [
+        "PASS",
+        "FAIL",
+        "UNKNOWN",
+        "N/A",
+        "SKIPPED"
+      ],
+      "verdict": "FAIL if any check FAILs, INCOMPLETE if any is UNKNOWN, PASS otherwise; exit 0, 3 or 1",
+      "profiles": {
+        "validate": {
+          "schema": "spark-daemon-validate/2",
+          "cost": "milliseconds",
+          "qualifying": false,
+          "checks": [
+            "DB-01",
+            "DB-02",
+            "DB-24",
+            "DB-25"
+          ]
+        },
+        "precheck": {
+          "schema": "spark-daemon-precheck/2",
+          "cost": "seconds",
+          "qualifying": false,
+          "checks": [
+            "DB-01",
+            "DB-02",
+            "DB-03",
+            "DB-04",
+            "DB-24",
+            "DB-25"
+          ]
+        },
+        "battery": {
+          "schema": "spark-daemon-battery/2",
+          "cost": "minutes",
+          "qualifying": "without --quick",
+          "checks": [
+            "DB-01",
+            "DB-02",
+            "DB-03",
+            "DB-04",
+            "DB-05",
+            "DB-06",
+            "DB-07",
+            "DB-08",
+            "DB-09",
+            "DB-10",
+            "DB-11",
+            "DB-12",
+            "DB-13",
+            "DB-14",
+            "DB-15",
+            "DB-16",
+            "DB-17",
+            "DB-18",
+            "DB-20",
+            "DB-22",
+            "DB-24",
+            "DB-25"
+          ]
+        }
       },
-      "battery": {
-        "schema": "spark-daemon-battery/1",
-        "cost": "about 15 seconds",
-        "checks": [
-          "DB-01",
-          "DB-02",
-          "DB-03",
-          "DB-04",
-          "DB-05",
-          "DB-06",
-          "DB-07",
-          "DB-08",
-          "DB-09",
-          "DB-10",
-          "DB-11",
-          "DB-12",
-          "DB-13",
-          "DB-14",
-          "DB-15",
-          "DB-16",
-          "DB-17",
-          "DB-18"
-        ],
-        "admissible": true
-      },
-      "admissible_for_activation": "battery PASS only, then a human Class C ruling"
+      "installable_unit": "only from a qualifying battery PASS (battery --emit-unit): the unit carries the manifest, daemon.py and contract digests, and a qualification record binds its bytes, options, report and host; the runtime refuses any other start outside test mode",
+      "admissible_for_activation": "a qualifying battery PASS is evidence; activation remains a human Class C decision"
     },
     "candidate": {
       "schema": "spark-daemon-candidate/1",

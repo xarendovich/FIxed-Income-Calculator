@@ -65,12 +65,14 @@ _SCOPE_SIGNAL = 1 << 1          # ABI 6+
 MIN_USABLE_ABI = 2
 
 READ = ACCESS_FS_EXECUTE | ACCESS_FS_READ_FILE | ACCESS_FS_READ_DIR
-# r4.6 (HF-36): read without execute. Only the system and interpreter paths keep EXECUTE, since
-# the allowlisted commands (resolved in /usr/bin or /bin) and the interpreter live there. The
-# daemon's own folder, its declared reads and its output directory never do: a binary the
-# daemon writes, or one someone else drops into a watched folder, cannot be run even if every
-# in-process layer is bypassed.
+# r4.6 (HF-36): read without execute on the daemon's own folder, its reads and its output
+# directory. r4.11 (R-2b): the system and interpreter paths lose execute too. Execute is granted
+# only on each executable the manifest declares, and on that executable's ELF loader, which the
+# kernel opens for execute on its behalf (evidence/r4.11/exec_grant_probe.txt). A daemon that
+# declares no command gets execute nowhere, so it cannot launch any program; Python still loads
+# native modules, which needs read and mmap, not execute.
 READ_NO_EXEC = ACCESS_FS_READ_FILE | ACCESS_FS_READ_DIR
+EXECUTE_FILE = ACCESS_FS_EXECUTE | ACCESS_FS_READ_FILE
 # Every fs access right this module knows how to name, regardless of which ABI actually
 # grants each one; restrict_self() ANDs this down to what the running ABI handles.
 ALL_FS_ACCESS = (1 << 16) - 1
@@ -198,13 +200,14 @@ def gaps(policy) -> list:
 
 def apply_supervisor_domain(policy, *, extra_read_paths=(), test_mode: bool) -> dict:
     """The domain runtime.py applies once, before the audit hook and before daemon code is
-    imported: read and execute on the system and interpreter paths (system_read_paths());
-    read without execute on the daemon's own folder and every declared read path that exists;
+    imported: read without execute on the system and interpreter paths (system_read_paths()),
+    the daemon's own folder and every declared read path that exists; execute only on the
+    declared commands and their loaders (execute_paths(), r4.11 R-2b);
     every access right except execute on the output directory (it already exists by this
     point - guard.prepare_output_dir ran earlier). No TCP bind or connect from ABI 4; signal
     scoping from ABI 6 (PD-15/L2). r4.6 (HF-36): execute was granted everywhere read was.
 
-    Returns a dict for DAEMON_START.landlock: {abi, status, gaps}. status is "enforced" or
+    Returns a dict for DAEMON_START.landlock: {abi, status, gaps, execute}. status is "enforced" or
     "unavailable" - never "partially enforced": a failed rule or restrict_self call raises
     (fail closed) rather than returning a weaker status, except when test_mode makes an
     unavailable or too-old Landlock non-fatal (PD-15)."""
@@ -217,13 +220,15 @@ def apply_supervisor_domain(policy, *, extra_read_paths=(), test_mode: bool) -> 
             raise LandlockError(
                 f"Landlock ABI {abi} unavailable or below the minimum usable ABI {MIN_USABLE_ABI}; "
                 "PD-15 requires it outside test mode")
-        return {"abi": max(abi, 0), "status": "unavailable", "gaps": []}
+        return {"abi": max(abi, 0), "status": "unavailable", "gaps": [], "execute": []}
 
     rules = []
-    executable = set(system_read_paths())
     for path in extra_read_paths:
         if os.path.exists(path):
-            rules.append((path, READ if path in executable else READ_NO_EXEC))
+            rules.append((path, READ_NO_EXEC))
+    granted = execute_paths(policy)
+    for path in granted:
+        rules.append((path, EXECUTE_FILE))
     for path in policy.reads:
         if os.path.exists(path):
             rules.append((path, READ_NO_EXEC))
@@ -237,12 +242,68 @@ def apply_supervisor_domain(policy, *, extra_read_paths=(), test_mode: bool) -> 
         rules.append((os.devnull, ACCESS_FS_READ_FILE | ACCESS_FS_WRITE_FILE))
 
     used_abi = restrict_self(rules, scope_signals=True)
-    return {"abi": used_abi, "status": "enforced", "gaps": gaps(policy)}
+    return {"abi": used_abi, "status": "enforced", "gaps": gaps(policy), "execute": list(granted)}
+
+
+def elf_interpreter(path):
+    """The ELF loader (PT_INTERP) an executable names, or None for a static executable or a
+    file that is not a 64- or 32-bit little-endian ELF. Standard library only; reads 64 KiB."""
+    import struct
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read(65536)
+    except OSError:
+        return None
+    if data[:4] != b"\x7fELF" or len(data) < 64 or data[5] != 1:
+        return None
+    wide = data[4] == 2
+    try:
+        if wide:
+            phoff, = struct.unpack_from("<Q", data, 0x20)
+            phentsize, phnum = struct.unpack_from("<HH", data, 0x36)
+        else:
+            phoff, = struct.unpack_from("<I", data, 0x1C)
+            phentsize, phnum = struct.unpack_from("<HH", data, 0x2A)
+        for i in range(min(phnum, 64)):
+            off = phoff + i * phentsize
+            if struct.unpack_from("<I", data, off)[0] != 3:          # PT_INTERP
+                continue
+            if wide:
+                start, = struct.unpack_from("<Q", data, off + 8)
+                size, = struct.unpack_from("<Q", data, off + 32)
+            else:
+                start, = struct.unpack_from("<I", data, off + 4)
+                size, = struct.unpack_from("<I", data, off + 16)
+            name = data[start:start + size].rstrip(b"\0").decode("ascii")
+            return os.path.realpath(name) if name.startswith("/") else None
+    except (struct.error, UnicodeDecodeError):
+        return None
+    return None
+
+
+def execute_paths(policy) -> tuple:
+    """The only files the domain lets the daemon execute (R-2b): each declared command as
+    resolved (guard.Policy.commands) and its ELF loader. Empty for a daemon with no commands.
+
+    Residual, recorded rather than hidden: the loader can itself be run as a program on any file
+    the daemon may read (`ld.so /usr/bin/true` ran under a domain that granted execute only on
+    git and its loader). Python-level code cannot do that (proc runs declared commands only and
+    the audit hook blocks every other spawn), but code that escaped Python could. Closing it at
+    the kernel needs commands run from outside the confined process (PD-72) or no commands in
+    the core (R-2); see ADJUDICATION-R4.9-OWNER-IMPLEMENTATION.md."""
+    out = set()
+    for path in policy.commands.values():
+        out.add(path)
+        loader = elf_interpreter(path)
+        if loader:
+            out.add(loader)
+    return tuple(sorted(p for p in out if os.path.isfile(p)))
 
 
 def system_read_paths():
-    """Read/execute paths every daemon needs regardless of its manifest: the Python runtime
-    it is running under, and the system libraries the interpreter and Git dynamically load."""
+    """Read paths every daemon needs regardless of its manifest: the Python runtime it is
+    running under, and the system libraries the interpreter and Git load. Read only since r4.11:
+    execute comes from execute_paths()."""
     import sys
     paths = ["/usr", "/etc/ld.so.cache"]
     for candidate in ("/lib", "/lib64"):

@@ -145,7 +145,7 @@ class BatteryTests(unittest.TestCase):
         self.assertEqual(ids[-5:], ["DB-18", "DB-20", "DB-22", "DB-24", "DB-25"])   # DB-19, 21, 23 reserved
         self.assertEqual(len(ids), 22)
         self.assertEqual((report["profile"], report["qualifying"]), ("battery", False))   # --quick
-        self.assertEqual(report["schema"], "spark-daemon-battery/1")
+        self.assertEqual(report["schema"], "spark-daemon-battery/2")
 
     def test_impure_daemon_fails(self):
         p = self.run_battery(os.path.join(FIXTURES, "opener", "manifest.json"))

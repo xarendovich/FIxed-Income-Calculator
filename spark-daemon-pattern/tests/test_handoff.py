@@ -74,7 +74,9 @@ class PublishedContractTests(unittest.TestCase):
         names = {m["name"] for m in body["ctx"]["methods"]}
         self.assertEqual(names, {"read_text", "list_dir", "stat", "disk_usage", "run", "git", "now_utc",
                                  "unsettled"})
-        self.assertEqual(len(body["evidence"]["battery"]["checks"]), 18)
+        from spark_daemon import judge
+        self.assertEqual(body["evidence"]["profiles"]["battery"]["checks"], judge.profile_ids("battery"))
+        self.assertEqual(sorted(body["evidence"]["checks"]), sorted(judge.registry()))
         self.assertIn("no authority", body["authority"])
 
     def test_describe_cli(self):
@@ -142,6 +144,9 @@ class SchemaAgreementTests(unittest.TestCase):
             "reserved event": lambda d: d["ledger"].update(event_types=["DAEMON_START"]),
             "lowercase event": lambda d: d["ledger"].update(event_types=["memory_changed"]),
             "digest enabled not bool": lambda d: d["digest"].update(enabled="yes"),
+            "deny (removed in 4.0.0)": lambda d: d.update(deny=[]),
+            "watchdog (removed in 4.0.0)": lambda d: d.update(watchdog_seconds=90),
+            "budget below the floor": lambda d: d.update(cycle_budget_seconds=4),
         }
         for label, mutate in mutations.items():
             data = copy.deepcopy(base)
@@ -153,11 +158,17 @@ class SchemaAgreementTests(unittest.TestCase):
     def test_cross_field_rules_are_manifest_py_only_and_declared(self):
         base = load_json(os.path.join(EXAMPLES, "meminfo-watch", "manifest.json"))
         data = copy.deepcopy(base)
-        data["step_timeout_seconds"] = 60                    # more than half of watchdog 90
+        data["cycle_budget_seconds"] = 1000                  # more than half of blind_limit 1800
         self.assertTrue(self.schema_ok(data))
         self.assertFalse(self.python_ok(data))
-        self.assertTrue(any("half of watchdog" in r for r in
-                            contract.manifest_json_schema()["x-spark-cross-field-rules"]))
+        rules = contract.manifest_json_schema()["x-spark-cross-field-rules"]
+        self.assertTrue(any("half of blind_limit_seconds" in r for r in rules))
+        # r4.11 (R-1): no gaps. A read containing a base-deny path is valid JSON Schema but refused.
+        data = copy.deepcopy(base)
+        data["reads"] = ["~"]
+        self.assertTrue(self.schema_ok(data))
+        self.assertFalse(self.python_ok(data))
+        self.assertTrue(any("no gaps" in r for r in rules))
 
 
 class EnvelopeTests(unittest.TestCase):
@@ -243,7 +254,7 @@ class ValidateJsonTests(unittest.TestCase):
         p = cli("validate", "--json", "--manifest", os.path.join(FIXTURES, "opener", "manifest.json"))
         self.assertEqual(p.returncode, 1)
         r = json.loads(p.stdout)
-        self.assertEqual(r["schema"], "spark-daemon-validate/1")
+        self.assertEqual(r["schema"], "spark-daemon-validate/2")
         self.assertEqual(r["diagnostics"], [{"layer": "purity", "severity": "error", "where": "daemon.py",
                                              "line": 5, "message": "call to open() is not allowed"}])
 

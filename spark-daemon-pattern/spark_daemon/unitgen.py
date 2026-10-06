@@ -49,8 +49,23 @@ RESTART_PREVENT = "RestartPreventExitStatus=" + " ".join(str(c) for c in NO_REST
 def stop_timeout_seconds(m) -> int:
     """r3.9 (HF-31): SIGTERM is honoured between cycles, and a cycle may legally run until the
     watchdog would fire. A fixed 30 s turned a stop during a slow cycle (git-watch: up to six Git
-    calls of 20 s) into a SIGKILL, recorded as an unclean end. Outlast one watchdog period."""
-    return max(30, m.watchdog_seconds + 10)
+    calls of 20 s) into a SIGKILL, recorded as an unclean end. Outlast one watchdog period. Since
+    r4.11 (R-6) derived from cycle_budget_seconds by manifest.stop_timeout_seconds_for."""
+    return m.stop_timeout_seconds
+
+
+def timing_problems(unit_text: str, m) -> list:
+    """The unit's timings against the ones derived from the manifest's cycle budget (R-6): a
+    unit whose watchdog, start or stop timeout says anything else contradicts the budget."""
+    expected = {"WatchdogSec": m.watchdog_seconds, "TimeoutStartSec": m.start_timeout_seconds,
+                "TimeoutStopSec": m.stop_timeout_seconds}
+    found = {}
+    for line in unit_text.splitlines():
+        key, _, value = line.strip().partition("=")
+        if key in expected:
+            found.setdefault(key, []).append(value)
+    return [f"{key}={','.join(found.get(key, ['missing']))}, but the cycle budget gives {value}"
+            for key, value in expected.items() if found.get(key) != [str(value)]]
 
 
 REQUIRED_DIRECTIVES = (
@@ -148,7 +163,7 @@ def generate(m, *, root: str, python: str = "/usr/bin/python3", require_paths=()
     lines += [
         f"Environment=SPARK_DAEMON_HOME={daemon_home}",
         f"WatchdogSec={m.watchdog_seconds}",
-        f"TimeoutStartSec={max(60, m.watchdog_seconds)}",
+        f"TimeoutStartSec={m.start_timeout_seconds}",
         f"TimeoutStopSec={stop_timeout_seconds(m)}",
         "Restart=on-failure",
         RESTART_PREVENT,

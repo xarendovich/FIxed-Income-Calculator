@@ -1,0 +1,5 @@
+Landlock ABI 7; git -> /usr/bin/git; ELF interpreter /lib64/ld-linux-x86-64.so.2
+execute on nothing                           git=refused(errno 13) true=refused(errno 13) sleep=refused(errno 13) native imports=ok
+execute on git only                          git=refused(errno 13) true=refused(errno 13) sleep=refused(errno 13) native imports=ok
+execute on git and its ELF interpreter       git=ran true=refused(errno 13) sleep=refused(errno 13) native imports=ok
+loader run directly on /usr/bin/true: exit 0 (RAN: the loader is a way around an exact grant)

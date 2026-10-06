@@ -9,6 +9,7 @@ import datetime
 import os
 import re
 import stat as stat_mod
+import time
 from dataclasses import dataclass
 
 from . import proc
@@ -21,6 +22,12 @@ class Missing(Exception):
 
 class TooLarge(Exception):
     """The content exceeds the requested bound."""
+
+
+class CycleBudgetExceeded(BaseException):
+    """The cycle reached cycle_budget_seconds (r4.11, R-6). The cycle fails and counts toward
+    the blind limit. A BaseException, so a daemon's `except Exception` cannot swallow it; the
+    runtime also checks the elapsed time itself, so swallowing it does not save the cycle."""
 
 
 class NotAllowed(Exception):
@@ -82,10 +89,27 @@ class Context:
     TooLarge = TooLarge
     NotAllowed = NotAllowed
 
-    def __init__(self, policy, *, step_timeout: int, tmp_dir: str):
+    def __init__(self, policy, *, cycle_budget: float, tmp_dir: str):
         self._policy = policy
-        self._timeout = step_timeout
+        self._budget = cycle_budget
+        self._deadline = None
         self._tmp = tmp_dir
+
+    def _begin_cycle(self, deadline: float) -> None:
+        """The runtime's: one monotonic deadline per cycle, set at cycle entry (R-6)."""
+        self._deadline = deadline
+
+    def _end_cycle(self) -> None:
+        self._deadline = None
+
+    def _remaining(self) -> float:
+        """The time a blocking call may take: whatever is left of the cycle's budget."""
+        if self._deadline is None:
+            return float(self._budget)
+        left = self._deadline - time.monotonic()
+        if left <= 0:
+            raise CycleBudgetExceeded("the cycle budget is spent")
+        return left
 
     def _resolve(self, path, follow=True):
         if not isinstance(path, str) or "\0" in path:
@@ -158,7 +182,7 @@ class Context:
             count_violation("run-git-outside-ctx-git")
             raise NotAllowed("use ctx.git() for Git")
         try:
-            return proc.run(argv, executables=self._policy.commands, timeout=self._timeout,
+            return proc.run(argv, executables=self._policy.commands, timeout=self._remaining(),
                             max_bytes=max_bytes)
         except proc.CommandNotAllowed as e:
             count_violation("command-not-allowed")
@@ -169,7 +193,7 @@ class Context:
         full = self._resolve(repo)
         args = _str_list(args, "args")
         try:
-            return proc.git(full, args, executables=self._policy.commands, timeout=self._timeout,
+            return proc.git(full, args, executables=self._policy.commands, timeout=self._remaining(),
                             max_bytes=max_bytes, tmp_dir=self._tmp, index_copy=bool(index_copy))
         except proc.CommandNotAllowed as e:
             count_violation("git-not-allowed")

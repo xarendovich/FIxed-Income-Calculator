@@ -29,7 +29,7 @@ RESULT is PASS only when nothing FAILs and nothing is UNKNOWN; otherwise FAIL, o
  DB-22 a second, independent ledger verifier agrees, on the daemon's ledger and damaged copies (r4.11)
 
 DB-24 the candidate envelope matches the files                (static; r4.11, judge.py)
-DB-25 the generated unit carries every required directive      (static; r4.11, judge.py)
+DB-25 the generated unit: every required directive, and timings derived from the cycle budget (static; r4.11)
 
 DB-19 is reserved for the direct cgroup memory reading (PD-76; the v0.1 line's registry), and
 DB-21 and DB-23 for the planned budget table and worst-case fixtures. A

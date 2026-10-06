@@ -71,9 +71,17 @@ class ManifestHardeningTests(unittest.TestCase):
         self.assertTrue(any("must not contain the protected path" in p for p in problems), problems)
         self.assertTrue(self.problems(output_dir="/", reads=["/proc/meminfo"]))
 
-    def test_output_dir_inside_the_manifests_own_deny_is_refused(self):
-        problems = self.problems(output_dir="~/out/counter", deny=["~/out"])
-        self.assertTrue(any("must not be inside ~/out" in p for p in problems), problems)
+    def test_a_deny_list_is_refused_with_its_migration(self):
+        # r4.11 (R-1): contract 4.0.0 removes the manifest's deny list outright; a v4 manifest
+        # that still has one is refused with the reason, not as a bare unknown key.
+        problems = self.problems(deny=["~/out"])
+        self.assertTrue(any(p.startswith("deny: removed in contract 4.0.0") for p in problems), problems)
+
+    def test_no_read_may_contain_an_always_denied_path(self):
+        # r4.11 (R-1, PD-100): no gaps. Landlock cannot carve ~/.ssh out of a grant on ~, so a
+        # read of ~ was enforced only in Python and by the unit (F-1). Now it is refused.
+        problems = self.problems(reads=["~"])
+        self.assertTrue(any("contains the always-denied path ~/.ssh" in p for p in problems), problems)
 
     def test_trailing_newlines_are_refused(self):
         # r2 used re.match with "$", which also matches before a final newline: a name of

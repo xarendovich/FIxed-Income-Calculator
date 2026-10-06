@@ -80,13 +80,11 @@ def manifest_template(name: str, purpose: str, unit: str) -> dict:
         "reads": ["/proc/sys/kernel/hostname"],
         "commands": [],
         "output_dir": f"~/spark-daemons/{name}",
-        "deny": [],
         "network": {"mode": "none"},
         "run_as": run_as,
         "resources": {"cpu_weight": 10, "cpu_budget_bp": 100, "memory_max_mb": 64, "tasks_max": 8,
                       "io_class": "idle"},
-        "watchdog_seconds": 180,
-        "step_timeout_seconds": 10,
+        "cycle_budget_seconds": 30,      # the longest one whole cycle may take; the watchdog derives from it
         "blind_limit_seconds": 3600,     # set above the longest legitimate unsettled period
         "ledger": {"record_max_bytes": 8192, "event_types": ["OBSERVATION_BASELINE", "OBSERVATION_CHANGED"]},
         "digest": {"enabled": True, "max_bytes": 8192},

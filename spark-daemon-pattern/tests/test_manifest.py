@@ -38,8 +38,8 @@ class ManifestTests(unittest.TestCase):
 
     def test_missing_key(self):
         d = example()
-        del d["watchdog_seconds"]
-        self.assertRefused(d, "missing key 'watchdog_seconds'")
+        del d["cycle_budget_seconds"]
+        self.assertRefused(d, "missing key 'cycle_budget_seconds'")
 
     def test_acting_daemons_refused(self):
         self.assertRefused(dict(example(), daemon_class="act"), "reserved")
@@ -69,8 +69,9 @@ class ManifestTests(unittest.TestCase):
         d["ledger"]["event_types"] = ["DAEMON_START"]
         self.assertRefused(d, "reserved for the skeleton")
 
-    def test_step_timeout_bounded_by_watchdog(self):
-        self.assertRefused(dict(example(), step_timeout_seconds=50, watchdog_seconds=90), "half of watchdog")
+    def test_cycle_budget_bounded_by_the_blind_limit(self):
+        self.assertRefused(dict(example(), cycle_budget_seconds=901, blind_limit_seconds=1800),
+                           "half of blind_limit_seconds")
 
     def test_system_unit_needs_non_root_user(self):
         self.assertRefused(dict(example(), run_as={"unit": "system"}), "dedicated user")
@@ -85,7 +86,7 @@ class ManifestTests(unittest.TestCase):
         self.assertRefused(dict(example(), purpose="Uses 100% of nothing, honestly."), "purpose")
 
     def test_floats_refused(self):
-        self.assertRefused(dict(example(), watchdog_seconds=90.0), "must be an integer")
+        self.assertRefused(dict(example(), cycle_budget_seconds=40.0), "must be an integer")
 
 
 if __name__ == "__main__":

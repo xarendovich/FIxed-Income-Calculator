@@ -1,15 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:spark:schema:spark-daemon-manifest:2",
-  "title": "Spark daemon manifest (spark-daemon-manifest/2)",
+  "$id": "urn:spark:schema:spark-daemon-manifest:3",
+  "title": "Spark daemon manifest (spark-daemon-manifest/3)",
   "description": "Closed schema: unknown keys are refused at every level, every value is bounded, floats are refused. Cross-field rules that JSON Schema cannot express are listed under x-spark-cross-field-rules.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "blind_limit_seconds",
     "commands",
+    "cycle_budget_seconds",
     "daemon_class",
-    "deny",
     "digest",
     "ledger",
     "manifest_schema",
@@ -20,14 +20,12 @@
     "reads",
     "resources",
     "run_as",
-    "step_timeout_seconds",
     "trigger",
-    "version",
-    "watchdog_seconds"
+    "version"
   ],
   "properties": {
     "manifest_schema": {
-      "const": "spark-daemon-manifest/2"
+      "const": "spark-daemon-manifest/3"
     },
     "name": {
       "type": "string",
@@ -80,7 +78,7 @@
       "items": {
         "$ref": "#/$defs/path"
       },
-      "description": "What ctx may read; none inside a denied path."
+      "description": "What ctx may read, and all it may read: none inside, and none containing, a base-deny path."
     },
     "commands": {
       "type": "array",
@@ -238,15 +236,6 @@
     "output_dir": {
       "$ref": "#/$defs/path"
     },
-    "deny": {
-      "type": "array",
-      "maxItems": 16,
-      "uniqueItems": true,
-      "items": {
-        "$ref": "#/$defs/path"
-      },
-      "description": "Extra denied paths, added to the fixed base list."
-    },
     "network": {
       "type": "object",
       "additionalProperties": false,
@@ -341,17 +330,11 @@
         }
       }
     },
-    "watchdog_seconds": {
+    "cycle_budget_seconds": {
       "type": "integer",
-      "minimum": 10,
-      "maximum": 3600,
-      "description": "systemd WatchdogSec="
-    },
-    "step_timeout_seconds": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 600,
-      "description": "Timeout for each ctx.run/ctx.git; at most half of watchdog_seconds."
+      "minimum": 5,
+      "maximum": 1800,
+      "description": "The longest one whole cycle (sense, decide, digest) may take. Every ctx call gets what is left of it; at the budget the cycle fails. WatchdogSec = 2 x budget + 10, TimeoutStopSec = WatchdogSec + 10, TimeoutStartSec = max(60, WatchdogSec); at most half of blind_limit_seconds."
     },
     "blind_limit_seconds": {
       "type": "integer",
@@ -437,12 +420,12 @@
     }
   },
   "x-spark-cross-field-rules": [
-    "step_timeout_seconds must be at most half of watchdog_seconds",
+    "cycle_budget_seconds must be at most half of blind_limit_seconds",
     "blind_limit_seconds must be at least 3 x trigger.interval_seconds",
     "run_as.user is required for unit 'system', must not be 'root', and is refused for unit 'user'",
     "paths are compared after expanding '~' (SPARK_DAEMON_HOME, else HOME) and resolving symlinks",
-    "every read path must lie outside every denied path (base deny plus the manifest's deny)",
-    "output_dir must not lie inside, or contain, ~/spark-core, ~/spark-governance, a base-deny path or a path in the manifest's deny",
+    "every read path must lie outside every base-deny path, and must not contain one (no gaps: the kernel's grant is the whole policy)",
+    "output_dir must not lie inside, or contain, ~/spark-core, ~/spark-governance or a base-deny path",
     "output_dir must not overlap any read path (a daemon never observes its own output)"
   ]
 }

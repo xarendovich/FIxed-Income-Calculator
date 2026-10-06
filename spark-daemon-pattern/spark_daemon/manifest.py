@@ -26,6 +26,29 @@ MANIFEST_MAX_BYTES = 65536
 # blind_limit_seconds (r3.5): a minute at least; a day at most, so "infinite patience" cannot
 # be written down; and at least three poll intervals, so one slow cycle is never fatal.
 BLIND_LIMIT_MIN, BLIND_LIMIT_MAX, BLIND_LIMIT_INTERVALS = 60, 86400, 3
+# cycle_budget_seconds (r4.11, R-6): the one declared cycle time. Every other timing is derived
+# from it here, by the framework, so no two declared numbers can contradict each other (HF-30,
+# HF-31). A cycle (sense, decide, digest) that reaches its budget fails and counts as blind time.
+CYCLE_BUDGET_MIN, CYCLE_BUDGET_MAX = 5, 1800
+WATCHDOG_MARGIN_SECONDS = 10
+
+
+def watchdog_seconds_for(cycle_budget: int) -> int:
+    """systemd WatchdogSec=. The runtime pings between cycles and at least every second while it
+    sleeps, so the longest silence is one cycle plus a second; twice the budget plus a margin
+    covers it with room for a slow interpreter."""
+    return 2 * cycle_budget + WATCHDOG_MARGIN_SECONDS
+
+
+def stop_timeout_seconds_for(cycle_budget: int) -> int:
+    """systemd TimeoutStopSec=. A stop is honoured between cycles (HF-31), so it must outlast one
+    watchdog period, which outlasts any cycle."""
+    return watchdog_seconds_for(cycle_budget) + 10
+
+
+def start_timeout_seconds_for(cycle_budget: int) -> int:
+    """systemd TimeoutStartSec=: start-up verifies the whole ledger (U-6) before READY=1."""
+    return max(60, watchdog_seconds_for(cycle_budget))
 
 # Always denied, for reading and writing, whatever the manifest says (never removable).
 BASE_DENY = (
@@ -94,8 +117,19 @@ def path_refusal(path: str):
 
 TOP_KEYS = {
     "manifest_schema", "name", "version", "purpose", "daemon_class", "trigger", "reads",
-    "commands", "output_dir", "deny", "network", "run_as", "resources", "watchdog_seconds",
-    "step_timeout_seconds", "blind_limit_seconds", "ledger", "digest",
+    "commands", "output_dir", "network", "run_as", "resources", "cycle_budget_seconds",
+    "blind_limit_seconds", "ledger", "digest",
+}
+# Schema 2 (contract 3.x) to schema 3 (contract 4.0.0): what changed, for the migration message.
+SCHEMA_2 = "spark-daemon-manifest/2"
+MIGRATION_2_TO_3 = {
+    "deny": "removed in contract 4.0.0 (R-1): what a daemon reads is exactly its reads list, and no "
+            "read may contain an always-denied path, so a deny list can no longer add anything. "
+            "Delete the key; narrow reads if a path you meant to exclude lies inside one",
+    "watchdog_seconds": "removed in contract 4.0.0 (R-6): set cycle_budget_seconds, the longest a "
+                        "whole cycle may take; the watchdog is derived from it",
+    "step_timeout_seconds": "removed in contract 4.0.0 (R-6): every ctx call now gets the time left "
+                            "in the cycle's budget (cycle_budget_seconds)",
 }
 
 
@@ -148,12 +182,10 @@ class Manifest:
     reads: tuple
     commands: tuple
     output_dir: str
-    deny: tuple
     network_mode: str
     run_as: RunAs
     resources: Resources
-    watchdog_seconds: int
-    step_timeout_seconds: int
+    cycle_budget_seconds: int
     blind_limit_seconds: int
     ledger: LedgerSpec
     digest: DigestSpec
@@ -166,7 +198,20 @@ class Manifest:
 
     @property
     def all_deny(self) -> tuple:
-        return BASE_DENY + self.deny
+        """The always-denied paths. Since contract 4.0.0 a manifest adds none (R-1)."""
+        return BASE_DENY
+
+    @property
+    def watchdog_seconds(self) -> int:
+        return watchdog_seconds_for(self.cycle_budget_seconds)
+
+    @property
+    def stop_timeout_seconds(self) -> int:
+        return stop_timeout_seconds_for(self.cycle_budget_seconds)
+
+    @property
+    def start_timeout_seconds(self) -> int:
+        return start_timeout_seconds_for(self.cycle_budget_seconds)
 
 
 class _Checker:
@@ -230,6 +275,20 @@ class _Checker:
 
 def parse(data: dict, path: str = "<memory>") -> Manifest:
     c = _Checker()
+    if isinstance(data, dict) and data.get("manifest_schema") == SCHEMA_2:
+        # Contract 4.0.0 migration: say exactly what changed, field by field, instead of listing
+        # unknown and missing keys.
+        c.fail("manifest_schema", f"is {SCHEMA_2} (contract 3.x); contract 4.0.0 needs {MANIFEST_SCHEMA!r}")
+        for key, why in MIGRATION_2_TO_3.items():
+            if key in data:
+                c.fail(key, why)
+        if "cycle_budget_seconds" not in data:
+            c.fail("cycle_budget_seconds", "required since contract 4.0.0: the longest a whole cycle may take")
+        raise ManifestError(c.problems)
+    if isinstance(data, dict):
+        for key in sorted(set(MIGRATION_2_TO_3) & set(data)):
+            c.fail(key, MIGRATION_2_TO_3[key])
+        data = {k: v for k, v in data.items() if k not in MIGRATION_2_TO_3}
     if not c.keys("manifest", data, TOP_KEYS):
         raise ManifestError(c.problems)
 
@@ -256,7 +315,6 @@ def parse(data: dict, path: str = "<memory>") -> Manifest:
             trigger = Trigger(kind, interval)
 
     reads = c.path_list("reads", data.get("reads"), 1, 32)
-    deny = c.path_list("deny", data.get("deny"), 0, 16)
 
     commands = ()
     cmds = data.get("commands")
@@ -315,16 +373,16 @@ def parse(data: dict, path: str = "<memory>") -> Manifest:
         if None not in (weight, budget, memory, tasks, io_class):
             resources = Resources(weight, budget, memory, tasks, io_class)
 
-    watchdog = c.integer("watchdog_seconds", data.get("watchdog_seconds"), 10, 3600)
-    step_timeout = c.integer("step_timeout_seconds", data.get("step_timeout_seconds"), 1, 600)
-    if watchdog and step_timeout and step_timeout * 2 > watchdog:
-        c.fail("step_timeout_seconds", "must be at most half of watchdog_seconds")
+    cycle_budget = c.integer("cycle_budget_seconds", data.get("cycle_budget_seconds"),
+                             CYCLE_BUDGET_MIN, CYCLE_BUDGET_MAX)
     # r3.5: how long the daemon may go without an accepted cycle (unsettled samples or failed
     # cycles) before it exits SENSE_BLIND. Required and bounded: no default, no infinity.
     blind_limit = c.integer("blind_limit_seconds", data.get("blind_limit_seconds"),
                             BLIND_LIMIT_MIN, BLIND_LIMIT_MAX)
     if blind_limit and trigger and blind_limit < BLIND_LIMIT_INTERVALS * trigger.interval_seconds:
         c.fail("blind_limit_seconds", f"must be at least {BLIND_LIMIT_INTERVALS} x trigger.interval_seconds")
+    if blind_limit and cycle_budget and cycle_budget * 2 > blind_limit:
+        c.fail("cycle_budget_seconds", "must be at most half of blind_limit_seconds (one slow cycle is never fatal)")
 
     ledger = None
     lg = data.get("ledger")
@@ -363,7 +421,7 @@ def parse(data: dict, path: str = "<memory>") -> Manifest:
     # (Landlock, ReadWritePaths=), so it must neither sit inside nor contain a protected tree.
     if output_dir:
         out = expand(output_dir)
-        for root in FORBIDDEN_OUTPUT_ROOTS + deny:
+        for root in FORBIDDEN_OUTPUT_ROOTS:
             full_root = expand(root)
             if within(out, full_root):
                 c.fail("output_dir", f"must not be inside {root}")
@@ -375,9 +433,14 @@ def parse(data: dict, path: str = "<memory>") -> Manifest:
                 c.fail("output_dir", f"must not overlap the read path {p} (a daemon never observes its own output)")
     for i, p in enumerate(reads):
         rp = expand(p)
-        for d in BASE_DENY + deny:
+        for d in BASE_DENY:
             if within(rp, expand(d)):
                 c.fail(f"reads[{i}]", f"{p} is inside the denied path {d}")
+            elif within(expand(d), rp):
+                # r4.11 (R-1, PD-100): no gaps. Landlock grants whole directories and cannot carve a
+                # denied folder out of one, so a read containing a denied path was enforced only by
+                # Python checks and the unit (F-1's race). Now the kernel's grant is the policy.
+                c.fail(f"reads[{i}]", f"{p} contains the always-denied path {d}; declare narrower reads")
 
     if c.problems:
         raise ManifestError(c.problems)
@@ -388,10 +451,9 @@ def parse(data: dict, path: str = "<memory>") -> Manifest:
         raise ManifestError([f"manifest: {e}"]) from None
     return Manifest(
         name=name, version=version, purpose=purpose, daemon_class=daemon_class,
-        trigger=trigger, reads=reads, commands=commands, output_dir=output_dir, deny=deny,
+        trigger=trigger, reads=reads, commands=commands, output_dir=output_dir,
         network_mode=network_mode, run_as=run_as, resources=resources,
-        watchdog_seconds=watchdog, step_timeout_seconds=step_timeout,
-        blind_limit_seconds=blind_limit, ledger=ledger,
+        cycle_budget_seconds=cycle_budget, blind_limit_seconds=blind_limit, ledger=ledger,
         digest=digest, sha256=digest_sha, path=os.path.abspath(path),
     )
 

@@ -191,13 +191,15 @@ def _db25(j, c):
         c.state, c.evidence = FAIL, str(e)
         c.diagnostics = [diagnostic("unit", str(e), where="unit")]
         return
-    missing = unitgen.lint(text)
-    if missing:
-        c.state, c.evidence = FAIL, f"missing directives: {', '.join(missing)}"
-        c.diagnostics = [diagnostic("unit", c.evidence, where="unit")]
+    problems = [f"missing directive {d}" for d in unitgen.lint(text)] + unitgen.timing_problems(text, j.m)
+    if problems:
+        c.state, c.evidence = FAIL, "; ".join(problems)
+        c.diagnostics = [diagnostic("unit", p, where="unit") for p in problems]
         return
     c.state = PASS
-    c.evidence = f"all {len(unitgen.REQUIRED_DIRECTIVES)} required directives present"
+    c.evidence = (f"all {len(unitgen.REQUIRED_DIRECTIVES)} required directives present; watchdog "
+                  f"{j.m.watchdog_seconds} s and stop timeout {j.m.stop_timeout_seconds} s derived from a "
+                  f"{j.m.cycle_budget_seconds} s cycle budget")
 
 
 # ---------------------------------------------------------------- the registry
@@ -235,7 +237,7 @@ def _registry():
         # DB-21 is reserved for the budget table and DB-23 for the worst-case fixtures.
         Spec("DB-22", "a second, independent verifier agrees", "run", lambda j, c: b.db22(j.ws, c)),
         Spec("DB-24", "candidate envelope matches the files", "static", _db24),
-        Spec("DB-25", "generated unit carries every required directive", "static", _db25),
+        Spec("DB-25", "generated unit: every required directive, timings from the cycle budget", "static", _db25),
     )
     return {s.id: s for s in specs}
 

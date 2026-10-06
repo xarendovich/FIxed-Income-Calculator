@@ -28,11 +28,11 @@ from . import proc, purity, render, unitgen
 from .canonical import MAX_SAFE_INT, canonical_bytes, sha256_hex
 
 CONTRACT_SCHEMA = "spark-daemon-contract/1"
-CONTRACT_VERSION = "3.1.0"
+CONTRACT_VERSION = "4.0.0"
 CANDIDATE_SCHEMA = "spark-daemon-candidate/1"
-VALIDATE_SCHEMA = "spark-daemon-validate/1"
-PRECHECK_SCHEMA = "spark-daemon-precheck/1"
-MANIFEST_SCHEMA_ID = "urn:spark:schema:spark-daemon-manifest:2"
+VALIDATE_SCHEMA = "spark-daemon-validate/2"
+PRECHECK_SCHEMA = "spark-daemon-precheck/2"
+MANIFEST_SCHEMA_ID = "urn:spark:schema:spark-daemon-manifest:3"
 
 AUTHORITY = (
     "A candidate carries no authority. Whoever or whatever produced it - a person, a script "
@@ -44,13 +44,13 @@ AUTHORITY = (
 # Rules manifest.py enforces that JSON Schema cannot express. Listed so an offline checker
 # knows exactly what it is not checking.
 CROSS_FIELD_RULES = (
-    "step_timeout_seconds must be at most half of watchdog_seconds",
+    "cycle_budget_seconds must be at most half of blind_limit_seconds",
     f"blind_limit_seconds must be at least {mf.BLIND_LIMIT_INTERVALS} x trigger.interval_seconds",
     "run_as.user is required for unit 'system', must not be 'root', and is refused for unit 'user'",
     "paths are compared after expanding '~' (SPARK_DAEMON_HOME, else HOME) and resolving symlinks",
-    "every read path must lie outside every denied path (base deny plus the manifest's deny)",
-    "output_dir must not lie inside, or contain, ~/spark-core, ~/spark-governance, a base-deny path "
-    "or a path in the manifest's deny",
+    "every read path must lie outside every base-deny path, and must not contain one (no gaps: the "
+    "kernel's grant is the whole policy)",
+    "output_dir must not lie inside, or contain, ~/spark-core, ~/spark-governance or a base-deny path",
     "output_dir must not overlap any read path (a daemon never observes its own output)",
 )
 
@@ -114,7 +114,8 @@ def manifest_json_schema() -> dict:
             },
             "reads": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": True,
                       "items": {"$ref": "#/$defs/path"},
-                      "description": "What ctx may read; none inside a denied path."},
+                      "description": "What ctx may read, and all it may read: none inside, and none "
+                                     "containing, a base-deny path."},
             "commands": {
                 "type": "array", "maxItems": 8, "uniqueItems": True,
                 "items": {"type": "string", "pattern": _anchored(mf.COMMAND_RE.pattern),
@@ -122,9 +123,6 @@ def manifest_json_schema() -> dict:
                 "description": "Bare command names ctx.run may execute ('git' only via ctx.git).",
             },
             "output_dir": {"$ref": "#/$defs/path"},
-            "deny": {"type": "array", "maxItems": 16, "uniqueItems": True,
-                     "items": {"$ref": "#/$defs/path"},
-                     "description": "Extra denied paths, added to the fixed base list."},
             "network": {"type": "object", "additionalProperties": False, "required": ["mode"],
                         "properties": {"mode": {"enum": ["none"],
                                                 "description": "'named' is reserved (relaxation R2)."}}},
@@ -150,9 +148,13 @@ def manifest_json_schema() -> dict:
                     "io_class": {"enum": ["idle", "best-effort"]},
                 },
             },
-            "watchdog_seconds": int_range(10, 3600, "systemd WatchdogSec="),
-            "step_timeout_seconds": int_range(1, 600, "Timeout for each ctx.run/ctx.git; at most "
-                                                      "half of watchdog_seconds."),
+            "cycle_budget_seconds": int_range(mf.CYCLE_BUDGET_MIN, mf.CYCLE_BUDGET_MAX,
+                                              "The longest one whole cycle (sense, decide, digest) may take. "
+                                              "Every ctx call gets what is left of it; at the budget the cycle "
+                                              "fails. WatchdogSec = 2 x budget + "
+                                              f"{mf.WATCHDOG_MARGIN_SECONDS}, TimeoutStopSec = WatchdogSec + 10, "
+                                              "TimeoutStartSec = max(60, WatchdogSec); at most half of "
+                                              "blind_limit_seconds."),
             "blind_limit_seconds": int_range(mf.BLIND_LIMIT_MIN, mf.BLIND_LIMIT_MAX,
                                              "Longest time without an accepted cycle before the daemon "
                                              "exits SENSE_BLIND (78, never restarted). Set it above the "
@@ -226,6 +228,33 @@ def ctx_capabilities() -> dict:
                       "outside the manifest's commands"}
 
 
+def _evidence() -> dict:
+    """The one judge's profiles (judge.py, r4.11 R-7), read from its registry: the check list
+    cannot drift from the checks that run (the 3.x text still listed DB-01 to DB-18)."""
+    from . import judge
+    reg = judge.registry()
+    checks = {i: reg[i].title for i in sorted(reg)}
+    return {
+        "checks": checks,
+        "states": list(judge.STATES),
+        "verdict": "FAIL if any check FAILs, INCOMPLETE if any is UNKNOWN, PASS otherwise; exit 0, 3 or 1",
+        "profiles": {
+            "validate": {"schema": VALIDATE_SCHEMA, "cost": "milliseconds", "qualifying": False,
+                         "checks": judge.profile_ids("validate")},
+            "precheck": {"schema": PRECHECK_SCHEMA, "cost": "seconds", "qualifying": False,
+                         "checks": judge.profile_ids("precheck")},
+            "battery": {"schema": BATTERY_SCHEMA, "cost": "minutes", "qualifying": "without --quick",
+                        "checks": judge.profile_ids("battery")},
+        },
+        "installable_unit": "only from a qualifying battery PASS (battery --emit-unit): the unit carries the "
+                            "manifest, daemon.py and contract digests, and a qualification record binds its "
+                            "bytes, options, report and host; the runtime refuses any other start outside "
+                            "test mode",
+        "admissible_for_activation": "a qualifying battery PASS is evidence; activation remains a human "
+                                     "Class C decision",
+    }
+
+
 def contract_body() -> dict:
     return {
         "manifest": {
@@ -278,6 +307,11 @@ def contract_body() -> dict:
             "unsettled": "sense() returned ctx.unsettled(reason): the cycle is abandoned before decide(), "
                          "with no event, no DAEMON_ERROR and no new digest",
             "failed": "sense() or decide() raised, or returned invalid data: DAEMON_ERROR (repeats collapsed)",
+            "budget": "one monotonic deadline per cycle, cycle_budget_seconds from its start: every ctx call "
+                      "gets the time left, and an alarm interrupts sense() and decide() at the deadline, "
+                      "including pure-Python loops; the cycle then fails with DAEMON_ERROR category "
+                      "CYCLE_BUDGET_EXCEEDED. The ledger write is never interrupted. The digest gets what is "
+                      "left; past it the previous digest stays",
             "blind_limit": "no accepted cycle for blind_limit_seconds (monotonic clock), whether from "
                            "unsettled or failed cycles: DAEMON_ERROR category SENSE_BLIND with blind_ms, "
                            "limit_ms, unsettled_cycles, failed_cycles, last_cause and last_cause_kind; then exit 78",
@@ -299,7 +333,7 @@ def contract_body() -> dict:
                          "(boot_id, boottime_ms, blind_since_boottime_ms)",
             "blind_forester": {
                 "observe": "fail closed: SENSE_BLIND, exit 78, never restarted (the only class in this contract)",
-                "active_classes": "a pre-validated survival loop (PD-01.9) is not available in contract 3.x; it "
+                "active_classes": "a pre-validated survival loop (PD-01.9) is not available in contract 4.x; it "
                                   "requires an Act-family class, the supervisor/worker split (PD-72) and "
                                   "pre-authorized survival actions",
             },
@@ -337,21 +371,13 @@ def contract_body() -> dict:
             str(EXIT_LEDGER_CORRUPT): "corrupt ledger; nothing changed",
             str(EXIT_UNCERTAIN_COMMIT): "uncertain ledger commit; recovery decides on restart",
             str(EXIT_ALREADY_RUNNING): "another instance holds the lock",
-            str(EXIT_POLICY): "unsafe output directory, Landlock refused, a policy violation, or SENSE_BLIND "
-                              "(no accepted cycle within blind_limit_seconds): fail closed, needs a human",
+            str(EXIT_POLICY): "unsafe output directory, Landlock refused, a policy violation, SENSE_BLIND "
+                              "(no accepted cycle within blind_limit_seconds), or a start that is not "
+                              "qualified (no battery PASS digests, or files changed since): fail closed, "
+                              "needs a human. The reason is the ledger's DAEMON_ERROR category or the log",
             "never_restarted": list(unitgen.NO_RESTART_EXIT_CODES),
         },
-        "evidence": {
-            "validate": {"schema": VALIDATE_SCHEMA, "cost": "milliseconds",
-                         "checks": "manifest schema and cross-field rules, purity, candidate envelope"},
-            "precheck": {"schema": PRECHECK_SCHEMA, "cost": "about 2 seconds",
-                         "checks": "validate, plus a short confined run under Landlock with the audit "
-                                   "hook recording, ledger provenance, and unit lint"},
-            "battery": {"schema": BATTERY_SCHEMA, "cost": "about 15 seconds",
-                        "checks": [f"DB-{i:02d}" for i in range(1, 19)],
-                        "admissible": True},
-            "admissible_for_activation": "battery PASS only, then a human Class C ruling",
-        },
+        "evidence": _evidence(),
         "candidate": {"schema": CANDIDATE_SCHEMA, "file": "candidate.json"},
         "authority": AUTHORITY,
     }

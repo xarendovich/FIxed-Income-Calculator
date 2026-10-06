@@ -110,18 +110,18 @@ The battery works in a temporary folder with its own HOME, so it never touches y
 
 | Field | Rule | Why |
 | --- | --- | --- |
-| `manifest_schema` | `spark-daemon-manifest/2` (r3.5; version 1 had no `blind_limit_seconds`) | Versioned like every other Spark schema |
+| `manifest_schema` | `spark-daemon-manifest/3` (contract 4.0.0, r4.11; a version 2 manifest is told field by field what changed) | Versioned like every other Spark schema |
 | `name`, `version`, `purpose` | slug; `x.y.z`; one plain line, no `%` | `%` is a systemd specifier |
 | `daemon_class` | `observe` only; `act` is reserved and refused | Acting daemons need their own pattern and authority gate |
 | `trigger` | `{"kind": "poll", "interval_seconds": 5..86400}`; `inotify-wakeup` reserved | Observer proposal C2 is deferred |
-| `reads` | 1–32 absolute or `~/` paths; none inside a denied path; no `.`/`..` segments, `//` or trailing `/` | What `ctx` may read |
-| `commands` | up to 8 bare names; shells, command runners (`env`, `timeout`, `tar`, `less`, ...), interpreters including versioned names (`python3.12`), network, privilege and file-mutation tools always refused | What `ctx.run` may execute; `git` only through `ctx.git` |
-| `output_dir` | the only writable place; never inside, and never containing, `~/spark-core`, `~/spark-governance` or a denied path (the manifest's own `deny` included); never overlapping `reads` | A daemon never observes its own output (v0.3 §6.7) |
-| `deny` | extra denied paths, added to a fixed base list that no manifest can shrink | Base: `~/spark-core/data`, `~/spark-governance/history`, `~/.ssh`, `~/.gnupg`, `~/.claude`, `~/.codex` |
+| `reads` | 1–32 absolute or `~/` paths; none inside, and none containing, an always-denied path (no gaps, r4.11); no `.`/`..` segments, `//` or trailing `/` | What `ctx` may read, and all it may read: the kernel's grant is the whole policy |
+| `commands` | up to 8 bare names; shells, command runners (`env`, `timeout`, `tar`, `less`, ...), interpreters including versioned names (`python3.12`), network, privilege and file-mutation tools always refused | What `ctx.run` may execute; `git` only through `ctx.git`. Since r4.11 the kernel grants execute on these executables and their loaders only; a daemon with none may execute nothing |
+| `output_dir` | the only writable place; never inside, and never containing, `~/spark-core`, `~/spark-governance` or an always-denied path; never overlapping `reads` | A daemon never observes its own output (v0.3 §6.7) |
+| (always denied) | `~/spark-core/data`, `~/spark-governance/history`, `~/.ssh`, `~/.gnupg`, `~/.claude`, `~/.codex`: no manifest can read or write them. The manifest's own `deny` list was removed in contract 4.0.0 (R-1) | With no gaps allowed, a deny list could add nothing the reads list does not already say |
 | `network` | `{"mode": "none"}`; `named` reserved | Outbound access needs relaxation R2 and a named destination |
 | `run_as` | `{"unit": "system", "user": ...}` (not root) or `{"unit": "user"}` | v0.3 §4 prefers a system unit with a dedicated user on Ubuntu 24.04 |
 | `resources` | `cpu_weight` 1–100, `cpu_budget_bp` (100 = 1%), `memory_max_mb` 64–2048, `tasks_max`, `io_class` | Budget checked by the battery; caps written into the unit |
-| `watchdog_seconds`, `step_timeout_seconds` | 10–3600; step timeout at most half the watchdog | Every command times out before systemd would kill the daemon |
+| `cycle_budget_seconds` | 5–1800; at most half of `blind_limit_seconds` (contract 4.0.0, R-6; replaces `watchdog_seconds` and `step_timeout_seconds`) | The longest one whole cycle may take. Every `ctx` call gets what is left; at the budget the cycle fails. `WatchdogSec` = 2 × budget + 10 and `TimeoutStopSec` = that + 10 are derived, so they cannot contradict it |
 | `blind_limit_seconds` | 60–86400, at least 3 × the poll interval; required, no default | How long the daemon may go without an accepted cycle before it stops for a human (see *Blind period* below) |
 | `ledger` | `record_max_bytes`; 1–32 declared `event_types`, none of them reserved | Only declared events can be written |
 | `digest` | `enabled`, `max_bytes` | Size-bounded, with an explicit truncation marker |

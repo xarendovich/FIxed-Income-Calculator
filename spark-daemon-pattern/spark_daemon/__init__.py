@@ -10,9 +10,9 @@ unit generator only prints text for a human to review.
 
 VERSION = "0.3.0"
 
-MANIFEST_SCHEMA = "spark-daemon-manifest/2"
+MANIFEST_SCHEMA = "spark-daemon-manifest/3"
 LEDGER_SCHEMA = "spark-daemon-ledger/1"
-BATTERY_SCHEMA = "spark-daemon-battery/1"
+BATTERY_SCHEMA = "spark-daemon-battery/2"
 
 # Event types the skeleton itself writes. A manifest may not declare them.
 RESERVED_EVENT_TYPES = (

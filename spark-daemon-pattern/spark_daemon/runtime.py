@@ -83,7 +83,7 @@ from . import (DIGEST_NAME, EXIT_ALREADY_RUNNING, EXIT_LEDGER_CORRUPT, EXIT_OK, 
                EXIT_SENSE_BLIND, EXIT_UNCERTAIN_COMMIT, EXIT_USAGE, LOCK_NAME, TMP_DIR, TMP_PREFIX, VERSION)
 from . import guard, landlock, ledger, manifest as manifest_mod, notify as notify_mod, purity, render, semantics
 from .canonical import CanonicalError, sha256_hex, to_json_value
-from .context import Context, Unsettled, utc_now
+from .context import Context, CycleBudgetExceeded, Unsettled, utc_now
 
 EXCEPTION_NAME_MAX = 64
 FOREIGN_NAMES_MAX = 20
@@ -180,6 +180,7 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
 
     interval = float(m.trigger.interval_seconds)
     blind_limit = float(m.blind_limit_seconds)
+    cycle_budget = float(m.cycle_budget_seconds)
     audit_mode = "enforce"
     if test_mode:
         ms = os.environ.get("SPARK_DAEMON_TEST_INTERVAL_MS")
@@ -190,6 +191,10 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
         if ms and ms.isdigit() and 100 <= int(ms) <= 3600000:
             blind_limit = int(ms) / 1000
             overrides["blind_limit_ms"] = int(ms)
+        ms = os.environ.get("SPARK_DAEMON_TEST_CYCLE_BUDGET_MS")
+        if ms and ms.isdigit() and 100 <= int(ms) <= 1800000:
+            cycle_budget = int(ms) / 1000
+            overrides["cycle_budget_ms"] = int(ms)
         if os.environ.get("SPARK_DAEMON_AUDIT") == "record":
             audit_mode = "record"
             overrides["audit_mode"] = "record"
@@ -239,7 +244,7 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
         return EXIT_POLICY
 
     guard.remove_stray_temp_files(out)
-    tool_versions = _tool_versions(policy, m.step_timeout_seconds)
+    tool_versions = _tool_versions(policy, cycle_budget)
     # Landlock (r2, AP-01) before the audit hook: the hook's own blocked events include
     # ctypes, which this step still needs. A kernel too old or without Landlock is a
     # start-up refusal outside test mode (PD-15), so the self-tests and the battery still
@@ -272,7 +277,8 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
     stop = _Stop()
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    ctx = Context(policy, step_timeout=m.step_timeout_seconds, tmp_dir=os.path.join(out, TMP_DIR))
+    ctx = Context(policy, cycle_budget=cycle_budget, tmp_dir=os.path.join(out, TMP_DIR))
+    signal.signal(signal.SIGALRM, _over_budget)
     recent = collections.deque(maxlen=RECENT_RECORDS)
     ping_every = max(0.2, min(1.0, m.watchdog_seconds / 4))
 
@@ -298,6 +304,7 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
             "daemon_code_sha256": code_sha,
             "tools": tool_versions,
             "interval_ms": int(interval * 1000),
+            "cycle_budget_ms": int(cycle_budget * 1000),
             "jitter_max_ms": int(jitter_bound * 1000),  # ledger values are integers; see canonical.py
             "landlock": landlock_info,
             "previous_run_ended_cleanly": ended_cleanly,
@@ -335,18 +342,33 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
             stage = "sense"
             error = unsettled = None
             prepared = snapshot = None
+            # r4.11 (R-6): one monotonic deadline per cycle, set here. Every ctx call gets what is
+            # left of it, and an alarm interrupts sense() and decide() at the deadline, including
+            # pure-Python loops and blocking reads the kernel lets a signal interrupt. The alarm is
+            # off while the ledger is written, so a commit is never cut short.
+            deadline = time.monotonic() + cycle_budget
+            ctx._begin_cycle(deadline)
             try:
-                sensed = module.sense(ctx)
-                if isinstance(sensed, Unsettled):
-                    unsettled = sensed.reason        # abandoned before decide(): no event, no error
-                else:
-                    snapshot = to_json_value(sensed)
-                    stage = "decide"
-                    events = module.decide(prev, snapshot)
-                    stage = "validate"
-                    prepared = writer.prepare(_validate_events(events, m.ledger.event_types))
+                try:
+                    _alarm(cycle_budget)
+                    sensed = module.sense(ctx)
+                    if isinstance(sensed, Unsettled):
+                        unsettled = sensed.reason        # abandoned before decide(): no event, no error
+                    else:
+                        snapshot = to_json_value(sensed)
+                        stage = "decide"
+                        events = module.decide(prev, snapshot)
+                        stage = "validate"
+                        prepared = writer.prepare(_validate_events(events, m.ledger.event_types))
+                finally:
+                    _alarm(0)
+                if time.monotonic() > deadline:
+                    # The daemon's own code caught the alarm: the cycle still overran.
+                    raise CycleBudgetExceeded("the cycle overran its budget")
             except guard.PolicyViolation as e:
                 error = ("POLICY_VIOLATION", e)
+            except CycleBudgetExceeded as e:
+                error, unsettled = ("CYCLE_BUDGET_EXCEEDED", e), None
             except (CanonicalError, ledger.RecordTooLarge, _EventError) as e:
                 error = ("SNAPSHOT_INVALID" if stage == "sense" else "EVENT_INVALID", e)
             except BaseException as e:  # noqa: BLE001 - daemon code may fail, even with SystemExit
@@ -361,8 +383,19 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
                 if streak:
                     recent.append(_cleared(writer, streak, "success"))
                     streak = None
-                if m.digest.enabled and hasattr(module, "digest"):
-                    _refresh_digest(module, m, out, writer, snapshot, recent)
+                left = deadline - time.monotonic()
+                if m.digest.enabled and hasattr(module, "digest") and left > 0:
+                    try:
+                        try:
+                            _alarm(left)
+                            _refresh_digest(module, m, out, writer, snapshot, recent)
+                        finally:
+                            _alarm(0)
+                    except CycleBudgetExceeded:
+                        # The cycle's events are committed; only the view is late. The previous
+                        # digest stays, with its older stamp.
+                        log("digest not refreshed: the cycle budget ran out")
+            ctx._end_cycle()
 
             # Counts violations even if the daemon's own code caught and ignored the exception.
             if guard.VIOLATIONS["count"] != violations_seen:
@@ -442,6 +475,15 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
         return EXIT_UNCERTAIN_COMMIT
     finally:
         writer.close()
+
+
+def _over_budget(_signum, _frame):
+    raise CycleBudgetExceeded("the cycle reached its budget")
+
+
+def _alarm(seconds: float) -> None:
+    """Arm (seconds > 0) or disarm (0) the cycle's alarm."""
+    signal.setitimer(signal.ITIMER_REAL, max(0.0, seconds))
 
 
 def _cpu_us() -> int:
