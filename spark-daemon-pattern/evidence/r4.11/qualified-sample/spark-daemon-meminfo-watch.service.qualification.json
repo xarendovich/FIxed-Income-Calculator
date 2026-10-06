@@ -1,0 +1,31 @@
+{
+  "schema": "spark-daemon-qualification/1",
+  "unit_name": "spark-daemon-meminfo-watch.service",
+  "unit_sha256": "ce1ddb9845f591001a83d91194d8724da95d90d46d62833fb0ba4c0f31038bc5",
+  "manifest_path": "/home/user/FIxed-Income-Calculator/spark-daemon-pattern/examples/meminfo-watch/manifest.json",
+  "manifest_sha256": "4549123b979c335b5a3e3cb74dacf1c4559bbb79ce5b872e74b47c8611be1eda",
+  "daemon_code_sha256": "cb5c9d74a1337f206b3ad4d555c8d8fd4127a4dd6c803aa96e3e309836ffc077",
+  "contract_sha256": "dfdb9f1b484d842d4e4f5d1684917371a7106b0bd68ebd06d388ab88f49b8ea6",
+  "contract_version": "4.0.0",
+  "unit_options": {
+    "python": "/usr/bin/python3",
+    "require_paths": [],
+    "part_of": "project-stack.service"
+  },
+  "battery": {
+    "profile": "battery",
+    "qualifying": true,
+    "result": "PASS",
+    "seed": 20260927,
+    "report_sha256": "8aab246822ce232e74cd90a2bd1d21c93e7897a70fbbb6e17c3b86f7b5cc4a5a"
+  },
+  "host": {
+    "kernel": "6.18.44-fc-v70",
+    "machine": "x86_64",
+    "landlock_abi": 7,
+    "cgroup": "v1",
+    "systemd": "systemd 255 (255.4-1ubuntu8.14)",
+    "machine_id_sha256": "a3b522eaa6f7dd890deea9529dc6f8ccc4e55f99fcece68d3d6a08001dfac3db"
+  },
+  "authority": "Qualification evidence only. It installs, enables and activates nothing; activation is a separate decision by a person with that authority."
+}

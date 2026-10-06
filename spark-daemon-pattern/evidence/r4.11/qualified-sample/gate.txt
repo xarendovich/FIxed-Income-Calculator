@@ -1,0 +1,1 @@
+RESULT: QUALIFIED (evidence for an activation decision; it activates nothing)

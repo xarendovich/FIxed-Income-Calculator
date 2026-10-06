@@ -1,0 +1,97 @@
+candidate: 55bb8b4e654737ea3a23f7d234d7daa0b1113924
+DB-01  PASS       manifest validates                                                       manifest sha256 525c26eb61a9e3f5
+DB-02  PASS       purity check                                                             no findings
+DB-03  PASS       confinement                                                              5 cycles; 0 audit events; no file outside the output directory changed
+DB-04  PASS       ledger integrity and provenance                                          3 records; chain head c8322420f8ca3887; provenance matches
+DB-05  PASS       crash and restart                                                        8 kills at [0.82, 0.464, 0.893, 0.111, 0.471, 0.87, 0.629, 0.314] s; 9 starts recorded, all after the first flagged unclean; 0 torn tail(s) quarantined; chain verifies
+DB-06  PASS       torn-tail quarantine                                                     both torn tails quarantined byte-for-byte, recorded, chain verifies
+DB-07  PASS       refuses a corrupt ledger                                                 flipped one byte in record 15: refused with exit 65, nothing changed
+DB-08  PASS       fsync failure                                                            exit 70 under injected fsync EIO; restart recovered; chain verifies (+4 records)
+DB-09  PASS       disk-full failure                                                        exit 70 under injected write ENOSPC; restart recovered; chain verifies (+3 records)
+DB-10  PASS       digest containment                                                       220 hostile renderings of this daemon's digest, seed 20260927; structure unchanged
+DB-11  PASS       notify protocol                                                          READY after DAEMON_START; 12 pings, longest gap 0.20 s; STOPPING at exit
+DB-12  PASS       single instance and SIGTERM                                              second instance refused (73); SIGTERM gave DAEMON_STOP and exit 0
+DB-13  PASS       audit hook blocks forbidden operations                                   10 forbidden operations blocked and counted; output-dir write allowed
+DB-14  PASS       resource budget                                                          4.80 ms CPU per cycle over 21 cycles, projected 0.008% at a 60 s interval (budget 1.00%); peak RSS 19.2 MiB (limit 64); whole process incl. start-up 211 ms CPU
+DB-15  PASS       unit hardening                                                           all required directives present; systemd-analyze offline exposure 0.4 (threshold 2.0); start-up syscalls permitted by the unit's seccomp filter
+DB-16  PASS       read-only verification                                                   two read-only verifications agree (seq 43, chain head a1fd96c2e39da72b); bytes and mtime unchanged
+DB-17  PASS       Landlock blocks with the audit hook record-only                          ABI 7: with the audit hook in record-only mode, the kernel alone still blocked the forbidden write and the denied read; TCP connect also blocked (EACCES)
+DB-18  PASS       DAEMON_START.landlock matches host and manifest                          DAEMON_START.landlock: ABI 7, status enforced, 0 gap(s); matches this host's ABI and the manifest's own gaps
+DB-20  PASS       observes within a blind limit                                            10 accepted and 0 unsettled or failed cycle(s) across 3 heartbeat(s); no SENSE_BLIND within a 1000 ms limit
+DB-22  PASS       a second, independent verifier agrees                                    both verifiers agree: own ledger intact to seq 3 (head 6841ee6c2af7d6b7), and the same break on 5 damaged copies
+DB-24  N/A        candidate envelope matches the files                                     no candidate envelope given
+DB-25  PASS       generated unit: every required directive, timings from the cycle budget  all 29 required directives present; watchdog 120 s and stop timeout 130 s derived from a 55 s cycle budget
+report: /tmp/spark-battery-q7rxm9cg/battery-report.json
+RESULT: PASS
+DB-01  PASS       manifest validates                                                       manifest sha256 4918d1ff2aa1edd9
+DB-02  PASS       purity check                                                             no findings
+DB-03  PASS       confinement                                                              5 cycles; 0 audit events; no file outside the output directory changed
+DB-04  PASS       ledger integrity and provenance                                          3 records; chain head 9e66432a5c124865; provenance matches
+DB-05  PASS       crash and restart                                                        8 kills at [0.82, 0.464, 0.893, 0.111, 0.471, 0.87, 0.629, 0.314] s; 9 starts recorded, all after the first flagged unclean; 0 torn tail(s) quarantined; chain verifies
+DB-06  PASS       torn-tail quarantine                                                     both torn tails quarantined byte-for-byte, recorded, chain verifies
+DB-07  PASS       refuses a corrupt ledger                                                 flipped one byte in record 15: refused with exit 65, nothing changed
+DB-08  PASS       fsync failure                                                            exit 70 under injected fsync EIO; restart recovered; chain verifies (+4 records)
+DB-09  PASS       disk-full failure                                                        exit 70 under injected write ENOSPC; restart recovered; chain verifies (+3 records)
+DB-10  PASS       digest containment                                                       220 hostile renderings of this daemon's digest, seed 20260927; structure unchanged
+DB-11  PASS       notify protocol                                                          READY after DAEMON_START; 12 pings, longest gap 0.20 s; STOPPING at exit
+DB-12  PASS       single instance and SIGTERM                                              second instance refused (73); SIGTERM gave DAEMON_STOP and exit 0
+DB-13  PASS       audit hook blocks forbidden operations                                   10 forbidden operations blocked and counted; output-dir write allowed
+DB-14  PASS       resource budget                                                          5.22 ms CPU per cycle over 21 cycles, projected 0.002% at a 300 s interval (budget 1.00%); peak RSS 19.1 MiB (limit 64); whole process incl. start-up 186 ms CPU
+DB-15  PASS       unit hardening                                                           all required directives present; systemd-analyze offline exposure 0.4 (threshold 2.0); start-up syscalls permitted by the unit's seccomp filter
+DB-16  PASS       read-only verification                                                   two read-only verifications agree (seq 43, chain head 780827eed5efe191); bytes and mtime unchanged
+DB-17  PASS       Landlock blocks with the audit hook record-only                          ABI 7: with the audit hook in record-only mode, the kernel alone still blocked the forbidden write and the denied read; TCP connect also blocked (EACCES)
+DB-18  PASS       DAEMON_START.landlock matches host and manifest                          DAEMON_START.landlock: ABI 7, status enforced, 0 gap(s); matches this host's ABI and the manifest's own gaps
+DB-20  PASS       observes within a blind limit                                            10 accepted and 0 unsettled or failed cycle(s) across 3 heartbeat(s); no SENSE_BLIND within a 1000 ms limit
+DB-22  PASS       a second, independent verifier agrees                                    both verifiers agree: own ledger intact to seq 3 (head 379d7e27701c4c2b), and the same break on 5 damaged copies
+DB-24  N/A        candidate envelope matches the files                                     no candidate envelope given
+DB-25  PASS       generated unit: every required directive, timings from the cycle budget  all 29 required directives present; watchdog 120 s and stop timeout 130 s derived from a 55 s cycle budget
+report: /tmp/spark-battery-3uj7saoq/battery-report.json
+RESULT: PASS
+DB-01  PASS       manifest validates                                                       manifest sha256 866ee5ca1f4dfeac
+DB-02  PASS       purity check                                                             no findings
+DB-03  PASS       confinement                                                              5 cycles; 0 audit events; no file outside the output directory changed
+DB-04  PASS       ledger integrity and provenance                                          3 records; chain head 44c5bd08414b7fb9; provenance matches
+DB-05  PASS       crash and restart                                                        8 kills at [0.82, 0.464, 0.893, 0.111, 0.471, 0.87, 0.629, 0.314] s; 9 starts recorded, all after the first flagged unclean; 0 torn tail(s) quarantined; chain verifies
+DB-06  PASS       torn-tail quarantine                                                     both torn tails quarantined byte-for-byte, recorded, chain verifies
+DB-07  PASS       refuses a corrupt ledger                                                 flipped one byte in record 15: refused with exit 65, nothing changed
+DB-08  PASS       fsync failure                                                            exit 70 under injected fsync EIO; restart recovered; chain verifies (+4 records)
+DB-09  PASS       disk-full failure                                                        exit 70 under injected write ENOSPC; restart recovered; chain verifies (+3 records)
+DB-10  PASS       digest containment                                                       220 hostile renderings of this daemon's digest, seed 20260927; structure unchanged
+DB-11  PASS       notify protocol                                                          READY after DAEMON_START; 12 pings, longest gap 0.20 s; STOPPING at exit
+DB-12  PASS       single instance and SIGTERM                                              second instance refused (73); SIGTERM gave DAEMON_STOP and exit 0
+DB-13  PASS       audit hook blocks forbidden operations                                   10 forbidden operations blocked and counted; output-dir write allowed
+DB-14  PASS       resource budget                                                          14.62 ms CPU per cycle over 21 cycles, projected 0.024% at a 60 s interval (budget 1.00%); peak RSS 19.2 MiB (limit 64); whole process incl. start-up 410 ms CPU
+DB-15  PASS       unit hardening                                                           all required directives present; systemd-analyze offline exposure 0.4 (threshold 2.0); start-up syscalls permitted by the unit's seccomp filter
+DB-16  PASS       read-only verification                                                   two read-only verifications agree (seq 43, chain head 17b0037d2e90678b); bytes and mtime unchanged
+DB-17  PASS       Landlock blocks with the audit hook record-only                          ABI 7: with the audit hook in record-only mode, the kernel alone still blocked the forbidden write and the denied read; TCP connect also blocked (EACCES)
+DB-18  PASS       DAEMON_START.landlock matches host and manifest                          DAEMON_START.landlock: ABI 7, status enforced, 0 gap(s); matches this host's ABI and the manifest's own gaps
+DB-20  PASS       observes within a blind limit                                            10 accepted and 0 unsettled or failed cycle(s) across 3 heartbeat(s); no SENSE_BLIND within a 1000 ms limit
+DB-22  PASS       a second, independent verifier agrees                                    both verifiers agree: own ledger intact to seq 3 (head 537fe05adb285dc0), and the same break on 5 damaged copies
+DB-24  N/A        candidate envelope matches the files                                     no candidate envelope given
+DB-25  PASS       generated unit: every required directive, timings from the cycle budget  all 29 required directives present; watchdog 240 s and stop timeout 250 s derived from a 115 s cycle budget
+report: /tmp/spark-battery-4ba6f1dg/battery-report.json
+RESULT: PASS
+DB-01  PASS       manifest validates                                                       manifest sha256 4549123b979c335b
+DB-02  PASS       purity check                                                             no findings
+DB-03  PASS       confinement                                                              5 cycles; 0 audit events; no file outside the output directory changed
+DB-04  PASS       ledger integrity and provenance                                          3 records; chain head 7744e743baa70314; provenance matches
+DB-05  PASS       crash and restart                                                        8 kills at [0.82, 0.464, 0.893, 0.111, 0.471, 0.87, 0.629, 0.314] s; 9 starts recorded, all after the first flagged unclean; 0 torn tail(s) quarantined; chain verifies
+DB-06  PASS       torn-tail quarantine                                                     both torn tails quarantined byte-for-byte, recorded, chain verifies
+DB-07  PASS       refuses a corrupt ledger                                                 flipped one byte in record 14: refused with exit 65, nothing changed
+DB-08  PASS       fsync failure                                                            exit 70 under injected fsync EIO; restart recovered; chain verifies (+4 records)
+DB-09  PASS       disk-full failure                                                        exit 70 under injected write ENOSPC; restart recovered; chain verifies (+3 records)
+DB-10  PASS       digest containment                                                       220 hostile renderings of this daemon's digest, seed 20260927; structure unchanged
+DB-11  PASS       notify protocol                                                          READY after DAEMON_START; 12 pings, longest gap 0.20 s; STOPPING at exit
+DB-12  PASS       single instance and SIGTERM                                              second instance refused (73); SIGTERM gave DAEMON_STOP and exit 0
+DB-13  PASS       audit hook blocks forbidden operations                                   10 forbidden operations blocked and counted; output-dir write allowed
+DB-14  PASS       resource budget                                                          5.44 ms CPU per cycle over 21 cycles, projected 0.018% at a 30 s interval (budget 1.00%); peak RSS 19.4 MiB (limit 64); whole process incl. start-up 225 ms CPU
+DB-15  PASS       unit hardening                                                           all required directives present; systemd-analyze offline exposure 0.4 (threshold 2.0); start-up syscalls permitted by the unit's seccomp filter
+DB-16  PASS       read-only verification                                                   two read-only verifications agree (seq 42, chain head 74abad9757875fa5); bytes and mtime unchanged
+DB-17  PASS       Landlock blocks with the audit hook record-only                          ABI 7: with the audit hook in record-only mode, the kernel alone still blocked the forbidden write and the denied read; TCP connect also blocked (EACCES)
+DB-18  PASS       DAEMON_START.landlock matches host and manifest                          DAEMON_START.landlock: ABI 7, status enforced, 0 gap(s); matches this host's ABI and the manifest's own gaps
+DB-20  PASS       observes within a blind limit                                            10 accepted and 0 unsettled or failed cycle(s) across 3 heartbeat(s); no SENSE_BLIND within a 1000 ms limit
+DB-22  PASS       a second, independent verifier agrees                                    both verifiers agree: own ledger intact to seq 3 (head 05e199f0329187b4), and the same break on 5 damaged copies
+DB-24  N/A        candidate envelope matches the files                                     no candidate envelope given
+DB-25  PASS       generated unit: every required directive, timings from the cycle budget  all 29 required directives present; watchdog 90 s and stop timeout 100 s derived from a 40 s cycle budget
+report: /tmp/spark-battery-zr0jcz9v/battery-report.json
+RESULT: PASS
