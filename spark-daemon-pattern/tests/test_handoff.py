@@ -279,22 +279,27 @@ class PrecheckTests(unittest.TestCase):
             with self.subTest(example=name):
                 code, r = self.precheck(os.path.join(EXAMPLES, name, "manifest.json"))
                 self.assertEqual(code, 0, json.dumps(r["checks"]))
-                self.assertEqual(r["result"], "OK")
+                self.assertEqual(r["result"], "PASS")
                 self.assertFalse(r["activation_evidence"])
+                self.assertFalse(r["qualifying"])
 
     def test_impure_daemon_fails_fast_and_skips_the_run(self):
         code, r = self.precheck(os.path.join(FIXTURES, "opener", "manifest.json"))
         self.assertEqual(code, 1)
-        self.assertEqual([c["state"] for c in r["checks"]], ["FAIL", "SKIPPED", "SKIPPED", "SKIPPED"])
+        states = {c["id"]: c["state"] for c in r["checks"]}
+        self.assertEqual(states, {"DB-01": "PASS", "DB-02": "FAIL", "DB-03": "SKIPPED", "DB-04": "SKIPPED",
+                                  "DB-24": "N/A", "DB-25": "PASS"})
 
     def test_policy_violation_is_caught_by_the_short_run(self):
         code, r = self.precheck(os.path.join(FIXTURES, "sneaky", "manifest.json"))
         self.assertEqual(code, 1)
-        self.assertEqual(r["checks"][1]["state"], "FAIL")
+        self.assertEqual({c["id"]: c["state"] for c in r["checks"]}["DB-03"], "FAIL")
 
-    def test_precheck_never_says_pass(self):
+    def test_precheck_is_never_qualifying(self):
+        # r4.11 (R-7): precheck says PASS in the one shared vocabulary, but it is feedback,
+        # never qualification. Only the full battery qualifies (and may emit a unit, R-3).
         code, r = self.precheck(os.path.join(EXAMPLES, "meminfo-watch", "manifest.json"))
-        self.assertNotEqual(r["result"], "PASS")
+        self.assertEqual((r["profile"], r["qualifying"], r["activation_evidence"]), ("precheck", False, False))
 
     def test_an_absolute_output_dir_prechecks_like_the_battery(self):
         # r4.7 (HF-37): the battery and precheck both rewrite an absolute output_dir into their

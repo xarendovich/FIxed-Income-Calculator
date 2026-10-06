@@ -141,15 +141,17 @@ class BatteryTests(unittest.TestCase):
         report_path = re.search(r"report: (\S+)", p.stdout).group(1)
         with open(report_path) as fh:
             report = json.load(fh)
-        self.assertEqual([c["id"] for c in report["checks"]][-2:], ["DB-18", "DB-20"])   # DB-19 reserved (PD-76)
-        self.assertEqual(len(report["checks"]), 19)
+        ids = [c["id"] for c in report["checks"]]
+        self.assertEqual(ids[-4:], ["DB-18", "DB-20", "DB-24", "DB-25"])   # DB-19, DB-21 to 23 reserved
+        self.assertEqual(len(ids), 21)
+        self.assertEqual((report["profile"], report["qualifying"]), ("battery", False))   # --quick
         self.assertEqual(report["schema"], "spark-daemon-battery/1")
 
     def test_impure_daemon_fails(self):
         p = self.run_battery(os.path.join(FIXTURES, "opener", "manifest.json"))
         self.assertTrue(p.stdout.strip().endswith("RESULT: FAIL"))
         self.assertRegex(p.stdout, r"DB-02\s+FAIL")
-        self.assertRegex(p.stdout, r"DB-03\s+FAIL")
+        self.assertRegex(p.stdout, r"DB-03\s+SKIPPED\s+.*not run: DB-02 failed")
 
 
 class RuntimeStructureTests(unittest.TestCase):

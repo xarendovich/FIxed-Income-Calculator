@@ -136,7 +136,8 @@ def main(argv=None) -> int:
                 print(f"candidate envelope sha256 {report['candidate']['envelope_sha256']} "
                       f"(contract {report['candidate']['contract_match']})")
             print(f"RESULT: {report['result']}")
-        return EXIT_OK if report["valid"] else EXIT_FAILED
+        from . import judge
+        return judge.exit_code(report["result"])
 
     if args.command == "precheck":
         from . import handoff
@@ -145,7 +146,8 @@ def main(argv=None) -> int:
             return EXIT_USAGE
         report = handoff.precheck_report(args.manifest, args.envelope, args.workdir)
         print(json.dumps(report, indent=2, ensure_ascii=False))
-        return EXIT_OK if report["result"] == "OK" else EXIT_FAILED
+        from . import judge
+        return judge.exit_code(report["result"])
 
     if args.command == "unit":
         from . import manifest, unitgen

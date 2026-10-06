@@ -1,4 +1,4 @@
-"""The conformance battery: one fixed, versioned set of checks every daemon must pass.
+"""The conformance battery: the run checks of the one judge (judge.py), and its battery profile.
 
 It runs the real daemon, in child processes, inside a disposable workspace with its own HOME,
 so it never touches your real output directory, ~/spark-core or ~/spark-governance.
@@ -27,13 +27,17 @@ RESULT is PASS only when nothing FAILs and nothing is UNKNOWN; otherwise FAIL, o
  DB-18 DAEMON_START.landlock is present and matches this host's ABI and the manifest's gaps (r2)
  DB-20 the daemon observes: accepted cycles, and no SENSE_BLIND within a short blind limit (r4.5)
 
-DB-19 is reserved for the direct cgroup memory reading (PD-76; the v0.1 line's registry). A
-check whose meaning changes gets a new ID instead of an edit (PD-78).
+DB-24 the candidate envelope matches the files                (static; r4.11, judge.py)
+DB-25 the generated unit carries every required directive      (static; r4.11, judge.py)
+
+DB-19 is reserved for the direct cgroup memory reading (PD-76; the v0.1 line's registry), and
+DB-21 to DB-23 for the planned budget table, independent verifier and worst-case fixtures. A
+check whose meaning changes gets a new ID instead of an edit (PD-78). The list, the profiles
+and the verdict rule live in judge.py; this module implements the checks that run the daemon.
 """
 
 import json
 import os
-import random
 import re
 import shutil
 import signal
@@ -43,24 +47,16 @@ import sys
 import tempfile
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
-from . import (BATTERY_SCHEMA, EXIT_FAILED, EXIT_FLAGGED, EXIT_OK, EXIT_USAGE, LEDGER_NAME,
+from . import (BATTERY_SCHEMA, EXIT_USAGE, LEDGER_NAME,
                QUARANTINE_DIR, RESERVED_EVENT_TYPES, VERSION, guard, landlock, ledger,
-               manifest as manifest_mod, proc, purity, unitgen)
+               manifest as manifest_mod, proc, unitgen)
 from .canonical import sha256_hex, strict_loads
 
 PATTERN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENTRY = os.path.join(PATTERN_ROOT, "bin", "spark-daemon")
 TEST_INTERVAL_MS = 200
-
-
-@dataclass
-class Check:
-    id: str
-    title: str
-    state: str = "UNKNOWN"
-    evidence: str = ""
 
 
 @dataclass
@@ -204,22 +200,6 @@ def _verify(ws):
     if result.torn:
         return None, f"torn tail of {result.torn.length} bytes left in place"
     return result, ""
-
-
-def db01(ws, c):
-    try:
-        m = manifest_mod.load(ws.manifest)
-    except manifest_mod.ManifestError as e:
-        c.state, c.evidence = "FAIL", "; ".join(e.problems[:5])
-        return None
-    c.state, c.evidence = "PASS", f"manifest sha256 {m.sha256[:16]}"
-    return m
-
-
-def db02(ws, c):
-    problems = purity.check_file(os.path.join(ws.daemon_dir, "daemon.py"))
-    c.state = "FAIL" if problems else "PASS"
-    c.evidence = "; ".join(problems[:5]) if problems else "no findings"
 
 
 def db03(ws, c, cycles=5):
@@ -698,103 +678,49 @@ def db18(ws, c):
 
 def main(manifest_path: str, *, seed: int, quick: bool, workdir: str | None, threshold: int,
          envelope: str | None = None) -> int:
+    """The battery profile of the one judge (judge.py, r4.11): every registered check."""
+    from . import contract, judge
     if not os.path.exists(manifest_path):
         print(f"no manifest at {manifest_path}")
         return EXIT_USAGE
-    daemon_path = os.path.join(os.path.dirname(os.path.abspath(manifest_path)), "daemon.py")
-    if not os.path.isfile(daemon_path):
-        print(f"no daemon.py beside {manifest_path}")
-        print("RESULT: FAIL")
-        return EXIT_FAILED
-    try:
-        ws = Workspace(manifest_path, workdir)
-    except manifest_mod.ManifestError as e:
-        for problem in e.problems:
-            print(f"manifest: {problem}")
-        print("RESULT: FAIL")
-        return EXIT_FAILED
-    rng = random.Random(seed)
-    checks = [Check(f"DB-{i:02d}", t) for i, t in enumerate([
-        "manifest validates", "purity check", "confinement", "ledger integrity and provenance",
-        "crash and restart", "torn-tail quarantine", "refuses a corrupt ledger", "fsync failure",
-        "disk-full failure", "digest containment", "notify protocol", "single instance and SIGTERM",
-        "audit hook blocks forbidden operations", "resource budget", "unit hardening",
-        "read-only verification", "Landlock blocks with the audit hook record-only",
-        "DAEMON_START.landlock matches host and manifest"], start=1)]
-    checks.append(Check("DB-20", "observes within a blind limit"))
-    by_id = {c.id: c for c in checks}
-
-    m = db01(ws, by_id["DB-01"])
-    db02(ws, by_id["DB-02"])
-    if m is not None:
-        ws.bind_manifest(m)
-        steps = [
-            ("DB-03", lambda c: db03(ws, c)),
-            ("DB-04", lambda c: db04(ws, c)),
-            ("DB-05", lambda c: db05(ws, c, rng, 3 if quick else 8)),
-            ("DB-06", lambda c: db06(ws, c)),
-            ("DB-07", lambda c: db07(ws, c)),
-            ("DB-08", lambda c: _fault(ws, c, ["-e", "trace=fsync", "-e", "inject=fsync:error=EIO:when=3+"], "fsync EIO")),
-            ("DB-09", lambda c: _fault(ws, c, ["-e", "trace=write", "-e", "inject=write:error=ENOSPC:when=1"], "write ENOSPC")),
-            ("DB-10", lambda c: db10(ws, c, seed)),
-            ("DB-11", lambda c: db11(ws, c)),
-            ("DB-12", lambda c: db12(ws, c)),
-            ("DB-13", lambda c: db13(ws, c)),
-            ("DB-14", lambda c: db14(ws, c)),
-            ("DB-15", lambda c: db15(ws, c, threshold)),
-            ("DB-16", lambda c: db16(ws, c)),
-            ("DB-17", lambda c: db17(ws, c)),
-            ("DB-18", lambda c: db18(ws, c)),
-            ("DB-20", lambda c: db20(ws, c)),
-        ]
-        for cid, fn in steps:
-            try:
-                fn(by_id[cid])
-            except Exception as e:  # noqa: BLE001 - a crashed check is a failed check, with evidence
-                by_id[cid].state = "FAIL"
-                by_id[cid].evidence = f"check crashed: {type(e).__name__}: {str(e)[:160]}"
-    else:
-        for c in checks[2:]:
-            c.state, c.evidence = "FAIL", "not run: the manifest is invalid"
-
-    states = [c.state for c in checks]
-    result = "FAIL" if "FAIL" in states else "INCOMPLETE" if "UNKNOWN" in states else "PASS"
-    from . import contract, handoff
-    candidate = None
-    if envelope:
-        # The battery judges the files it ran. The envelope is quoted so the report can be
-        # tied to a candidate; an envelope that does not match those files means the report
-        # is about different bytes than the candidate claims, so the verdict cannot be PASS.
-        summary, diags = handoff.check_envelope(envelope, os.path.dirname(os.path.abspath(manifest_path)))
-        candidate = {"summary": summary, "diagnostics": diags}
-        if any(d["severity"] == "error" for d in diags) and result == "PASS":
-            result = "INCOMPLETE"
-    # r3.3: the bytes the checks ran, so a verdict is bound to the code as well as the manifest
-    # even without an envelope (the digest an activation register must match, PD-40).
-    with open(os.path.join(ws.daemon_dir, "daemon.py"), "rb") as fh:
-        code_sha = sha256_hex(fh.read())
+    j = judge.run("battery", manifest_path, envelope=envelope, workdir=workdir, seed=seed,
+                  quick=quick, threshold=threshold)
+    if j.ws is None:
+        j.ws = Workspace.__new__(Workspace)            # nothing ran: a report folder only
+        j.ws.root = os.path.realpath(workdir or tempfile.mkdtemp(prefix="spark-battery-"))
+        os.makedirs(j.ws.root, exist_ok=True)
+        j.ws.rewrites, j.ws.m = [], None
+    envelope_check = next(c for c in j.checks if c.id == "DB-24")
+    candidate = None if envelope_check.state == judge.NA else {
+        "summary": j.candidate, "diagnostics": envelope_check.diagnostics}
     report = {
         "schema": BATTERY_SCHEMA, "skeleton_version": VERSION, **contract.contract_identity(),
-        "candidate": candidate, "result": result, "seed": seed,
-        "quick": quick, "daemon": m.name if m else None, "manifest_sha256": m.sha256 if m else None,
-        "daemon_code_sha256": code_sha, "workspace": ws.root, "rewrites": ws.rewrites,
+        "profile": j.profile, "qualifying": j.qualifying,
+        "candidate": candidate, "result": j.result, "seed": seed,
+        "quick": quick, "daemon": j.m.name if j.m else None,
+        # The manifest as written, which is what a unit runs; run checks used the workspace's
+        # copy, whose digest differs when an absolute output_dir was rewritten.
+        "manifest_sha256": j.m.sha256 if j.m else None,
+        "workspace_manifest_sha256": j.ws.m.sha256 if j.ws.m else None,
+        "daemon_code_sha256": j.code_sha, "workspace": j.ws.root, "rewrites": j.ws.rewrites,
         "environment": {"python": sys.version.split()[0], "kernel": os.uname().release,
                         "machine": os.uname().machine, "strace": bool(_strace()),
                         "systemd_analyze": bool(shutil.which("systemd-analyze", path=proc.SYSTEM_PATH))},
-        "checks": [asdict(c) for c in checks],
+        "checks": [{"id": c.id, "title": c.title, "state": c.state, "evidence": c.evidence}
+                   for c in j.checks],
     }
-    report_path = os.path.join(ws.root, "battery-report.json")
+    report_path = os.path.join(j.ws.root, "battery-report.json")
     with open(report_path, "w") as fh:
         json.dump(report, fh, indent=2)
         fh.write("\n")
-    width = max(len(c.title) for c in checks)
-    for c in checks:
+    width = max(len(c.title) for c in j.checks)
+    for c in j.checks:
         print(f"{c.id}  {c.state:<10} {c.title:<{width}}  {c.evidence}")
-    for note in ws.rewrites:
+    for note in j.ws.rewrites:
         print(f"note: battery rewrote {note}")
     if candidate:
         for d in candidate["diagnostics"]:
             print(f"candidate: {d['where']}: {d['message']}")
     print(f"report: {report_path}")
-    print(f"RESULT: {result}")
-    return {"PASS": EXIT_OK, "INCOMPLETE": EXIT_FLAGGED}.get(result, EXIT_FAILED)
+    print(f"RESULT: {j.result}")
+    return judge.exit_code(j.result)

@@ -11,7 +11,8 @@ The envelope names the exact files (sha256) and the contract they were built aga
 (contract_version and contract_sha256, from `spark-daemon describe`). Its schema is closed
 and has no field for results, verdicts or approvals: a candidate cannot carry a claim about
 itself. validate and precheck answer with their own reports, which quote the envelope's
-digest the way a ProcessingObservation quotes the HandoffEnvelope it observed.
+digest the way a ProcessingObservation quotes the HandoffEnvelope it observed. Since r4.11
+both are profiles of the one judge (judge.py); the envelope is its check DB-24.
 
 Reports use one diagnostic shape everywhere (modelled on `terraform validate -json`):
     {"layer", "severity": "error"|"warning", "where", "line", "message"}
@@ -20,8 +21,8 @@ Reports use one diagnostic shape everywhere (modelled on `terraform validate -js
 import os
 import re
 
+from . import judge
 from . import manifest as mf
-from . import purity
 from .canonical import CanonicalError, canonical_bytes, sha256_hex, strict_loads
 from .contract import (AUTHORITY, CANDIDATE_SCHEMA, PRECHECK_SCHEMA, VALIDATE_SCHEMA,
                        contract_identity)
@@ -35,8 +36,7 @@ _SEMVER = re.compile(r"(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})")
 _PRODUCER_ID = re.compile(r"[A-Za-z0-9 ._:/@+()-]{1,120}")
 
 
-def diagnostic(layer, message, *, where="", line=None, severity="error") -> dict:
-    return {"layer": layer, "severity": severity, "where": where, "line": line, "message": message}
+diagnostic = judge.diagnostic
 
 
 def _file_sha256(path):
@@ -168,136 +168,63 @@ def check_envelope(envelope_path: str, directory: str):
     return summary, diags
 
 
-# ---------------------------------------------------------------- validate --json
+# ---------------------------------------------------------------- validate and precheck
+#
+# r4.11 (R-7): both are profiles of the one judge (judge.py). These functions only shape its
+# result into their published report formats; they decide nothing themselves.
 
-_WHERE_MESSAGE = re.compile(r"^([A-Za-z_][\w.\[\]]*): (.*)$", re.S)
-_PURITY_LINE = re.compile(r"^[^:]+:(\d+): (.*)$", re.S)
-_PURITY_FILE = re.compile(r"^[^:]+: (.*)$", re.S)
-
-
-def _manifest_diags(problems):
-    out = []
-    for problem in problems:
-        m = _WHERE_MESSAGE.match(problem)
-        where, message = (m.group(1), m.group(2)) if m else ("manifest", problem)
-        out.append(diagnostic("manifest", message, where=where))
-    return out
+def _identity(j):
+    return {"daemon": j.m.name if j.m else None,
+            "manifest_sha256": j.m.sha256 if j.m else None,
+            "daemon_code_sha256": j.code_sha,
+            "candidate": j.candidate}
 
 
-def _purity_diags(problems):
-    out = []
-    for problem in problems:
-        m = _PURITY_LINE.match(problem)
-        if m:
-            out.append(diagnostic("purity", m.group(2), where="daemon.py", line=int(m.group(1))))
-            continue
-        m = _PURITY_FILE.match(problem)
-        out.append(diagnostic("purity", m.group(1) if m else problem, where="daemon.py"))
-    return out
+def _checks(j):
+    return [{"id": c.id, "title": c.title, "state": c.state, "evidence": c.evidence} for c in j.checks]
 
 
 def validate_report(manifest_path: str, envelope_path: str | None = None):
-    """Returns (report, manifest | None). Checks the manifest, the code's purity and, when
-    given, the candidate envelope. Milliseconds; no process is started."""
-    diags, m, code_sha = [], None, None
-    directory = os.path.dirname(os.path.abspath(manifest_path))
-    try:
-        m = mf.load(manifest_path)
-    except mf.ManifestError as e:
-        diags += _manifest_diags(e.problems)
-    code_path = os.path.join(directory, "daemon.py")
-    diags += _purity_diags(purity.check_file(code_path))
-    if os.path.isfile(code_path):
-        code_sha = _file_sha256(code_path)
-    candidate = None
-    if envelope_path:
-        candidate, env_diags = check_envelope(envelope_path, directory)
-        diags += env_diags
+    """Returns (report, manifest | None): the validate profile (DB-01, DB-02, DB-24, DB-25).
+    Milliseconds; no process is started."""
+    j = judge.run("validate", manifest_path, envelope=envelope_path)
+    diags = j.diagnostics()
     errors = sum(1 for d in diags if d["severity"] == "error")
     report = {
         "schema": VALIDATE_SCHEMA,
         **contract_identity(),
-        "result": "FAIL" if errors else "PASS",
-        "valid": not errors,
+        "profile": j.profile,
+        "qualifying": j.qualifying,
+        "result": j.result,
+        "valid": j.result == "PASS",
         "error_count": errors,
         "warning_count": len(diags) - errors,
-        "daemon": m.name if m else None,
-        "manifest_sha256": m.sha256 if m else None,
-        "daemon_code_sha256": code_sha,
-        "candidate": candidate,
+        **_identity(j),
+        "checks": _checks(j),
         "diagnostics": diags,
         "authority": AUTHORITY,
     }
-    return report, m
+    return report, j.m
 
-
-# ---------------------------------------------------------------- precheck
 
 def precheck_report(manifest_path: str, envelope_path: str | None = None, workdir: str | None = None) -> dict:
-    """The fast lane between validate and the battery (about 2 s): validate, then a short
-    confined run in a disposable workspace (Landlock applied, audit hook recording), the
-    ledger's provenance, and the generated unit's lint and seccomp allowances. A precheck
-    result is "OK" or "FAIL", never "PASS": it is feedback for whoever is iterating, not
-    evidence for activation."""
-    from . import battery, unitgen
-    validation, m = validate_report(manifest_path, envelope_path)
-    checks = [{"id": "PC-01", "title": "validate (manifest, purity, envelope)",
-               "state": "PASS" if validation["valid"] else "FAIL",
-               "evidence": f"{validation['error_count']} error(s), {validation['warning_count']} warning(s)"}]
-    if validation["valid"]:
-        ws = battery.Workspace(manifest_path, workdir)
-        # r4.7 (HF-37): bind the workspace's copy, as the battery does (DB-01). An absolute
-        # output_dir is rewritten into the workspace; binding the original manifest made the
-        # confined run look for its ledger in the real output directory and count the
-        # rewritten one as a write outside the output directory.
-        from . import manifest as manifest_mod
-        ws.bind_manifest(manifest_mod.load(ws.manifest))
-        smoke = battery.Check("PC-02", "confined run (2 cycles, Landlock, audit hook recording)")
-        battery.db03(ws, smoke, cycles=2)
-        provenance = battery.Check("PC-03", "ledger integrity and provenance")
-        battery.db04(ws, provenance)
-        unit = battery.Check("PC-04", "unit lint and start-up syscalls")
-        try:
-            text = unitgen.generate(ws.m, root=battery.PATTERN_ROOT)
-        except unitgen.UnitError as e:
-            text, unit_error = "", str(e)
-        else:
-            unit_error = ""
-        missing = unitgen.lint(text) if text else []
-        analyze = battery.shutil.which("systemd-analyze", path=battery.proc.SYSTEM_PATH)
-        blocked = battery._startup_syscalls_blocked(analyze, text) if analyze and text else None
-        if unit_error:
-            unit.state, unit.evidence = "FAIL", unit_error
-        elif missing or blocked:
-            unit.state = "FAIL"
-            unit.evidence = "; ".join(filter(None, [
-                f"missing directives: {', '.join(missing)}" if missing else "",
-                f"seccomp blocks: {', '.join(blocked)}" if blocked else ""]))
-        else:
-            unit.state = "PASS" if blocked is not None else "UNKNOWN"
-            unit.evidence = "all required directives present" + (
-                "; start-up syscalls permitted" if blocked is not None else "; systemd-analyze not installed")
-        checks += [{"id": c.id, "title": c.title, "state": c.state, "evidence": c.evidence}
-                   for c in (smoke, provenance, unit)]
-        workspace = ws.root
-    else:
-        checks += [{"id": cid, "title": title, "state": "SKIPPED", "evidence": "validate failed"}
-                   for cid, title in (("PC-02", "confined run"), ("PC-03", "ledger provenance"),
-                                      ("PC-04", "unit lint"))]
-        workspace = None
-    failed = any(c["state"] == "FAIL" for c in checks)
+    """The precheck profile: validate's checks, then a short confined run in a disposable
+    workspace (DB-03 with two cycles) and the ledger's provenance (DB-04). Seconds; offline; no
+    tool beyond Python is needed. Its result is feedback for whoever is iterating, never
+    qualification: `qualifying` is false, and only the battery may emit an installable unit."""
+    j = judge.run("precheck", manifest_path, envelope=envelope_path, workdir=workdir)
     return {
         "schema": PRECHECK_SCHEMA,
         **contract_identity(),
-        "result": "FAIL" if failed else "OK",
+        "profile": j.profile,
+        "qualifying": j.qualifying,
+        "result": j.result,
         "activation_evidence": False,
-        "daemon": validation["daemon"],
-        "manifest_sha256": validation["manifest_sha256"],
-        "daemon_code_sha256": validation["daemon_code_sha256"],
-        "candidate": validation["candidate"],
-        "checks": checks,
-        "diagnostics": validation["diagnostics"],
-        "workspace": workspace,
-        "next": "spark-daemon battery --manifest <manifest.json>" if not failed else "fix the diagnostics",
+        **_identity(j),
+        "checks": _checks(j),
+        "diagnostics": j.diagnostics(),
+        "workspace": j.ws.root if j.ws else None,
+        "next": ("spark-daemon battery --manifest <manifest.json>" if j.result != "FAIL"
+                 else "fix the diagnostics"),
         "authority": AUTHORITY,
     }
