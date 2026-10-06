@@ -126,15 +126,20 @@ def run(argv, *, executables: dict, timeout: float, max_bytes: int, cwd=None, ex
             size += len(data)
     finally:
         sel.close()
-        if timed_out or truncated:
-            _kill_group(proc)
         proc.stdout.close()
         try:
+            if timed_out or truncated:
+                _kill_group(proc)
             proc.wait(timeout=max(0.1, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
-            _kill_group(proc)
-            proc.wait()
             timed_out = True
+        finally:
+            # r4.11 (HF-40): whatever ends this call, the command's process group does not outlive
+            # it. The cycle's alarm (R-6) can raise during the wait above; before, a command that
+            # closed its stdout and kept running was then left behind, one per cycle.
+            if proc.returncode is None:
+                _kill_group(proc)
+                proc.wait()
     text = b"".join(chunks).decode("utf-8", "replace")
     return RunResult(None if (timed_out or truncated) else proc.returncode, text, truncated, timed_out)
 

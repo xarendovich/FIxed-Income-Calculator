@@ -40,6 +40,32 @@ class ProcTests(unittest.TestCase):
         self.assertTrue(r.timed_out)
         self.assertLess(time.monotonic() - start, 3)
 
+    def test_an_exception_mid_wait_still_kills_the_group(self):
+        # r4.11 (HF-40): the cycle's alarm (R-6) can raise inside proc.run's cleanup wait. A
+        # command that closed its stdout and kept running then outlived the cycle, one per cycle.
+        import signal
+
+        class Alarm(BaseException):
+            pass
+
+        def raise_alarm(_signum, _frame):
+            raise Alarm()
+        marker = f"sleep {40 + os.getpid() % 9}"
+        old = signal.signal(signal.SIGALRM, raise_alarm)
+        try:
+            signal.setitimer(signal.ITIMER_REAL, 0.3)
+            with self.assertRaises(Alarm):
+                proc.run(["sh", "-c", f"exec 1>&-; {marker}"], executables={"sh": "/bin/sh"}, timeout=0.3,
+                         max_bytes=100)
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, old)
+        time.sleep(0.3)
+        alive = subprocess.run(["pgrep", "-f", marker], capture_output=True, text=True).stdout.split()
+        for pid in alive:
+            os.kill(int(pid), signal.SIGKILL)
+        self.assertEqual(alive, [])
+
     def test_git_ignores_user_configuration(self):
         """Script-board F5: color.ui=always and diff.external in the user's config must not leak."""
         home = os.path.join(self.tmp, "home")
