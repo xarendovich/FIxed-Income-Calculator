@@ -73,7 +73,7 @@ A candidate is a folder: `manifest.json`, `daemon.py` and, from a script or a mo
 
 ## 5. The authority rule
 
-Stated once, and embedded verbatim in every contract, validate and precheck report (`authority`):
+Stated once, and embedded verbatim in the contract (`authority`); every report carries its own authority note:
 
 > A candidate carries no authority. Whoever or whatever produced it - a person, a script or a model - it cannot certify itself: validate and precheck are fast feedback, the conformance battery's PASS is the only admissible evidence, and activation remains a human Class C decision. A producer is never granted authority that no one adjudicated.
 
@@ -83,9 +83,11 @@ This is the discipline the project already applies to daemon *content*, applied 
 
 | Lane | Cost | Checks | Answers | Admissible for activation |
 | --- | --- | --- | --- | --- |
-| `validate [--json] [--envelope]` | milliseconds, no process started | manifest schema and cross-field rules, purity, envelope | PASS / FAIL | No |
-| `precheck [--envelope]` | about 1 s | validate, plus a 2-cycle run under Landlock with the audit hook recording (no file outside the output dir changed), ledger provenance with zero `DAEMON_ERROR`, unit lint and seccomp allowances | **OK** / FAIL, never PASS; `activation_evidence: false` | No |
-| `battery [--envelope]` | about 15 s | DB-01 to DB-18 | PASS / FAIL / INCOMPLETE | **Only PASS**, then a human Class C ruling |
+| `precheck [--json] [--envelope]` | milliseconds, no process started | DB-01, DB-02, DB-24, DB-25: manifest schema and cross-field rules, purity, envelope, unit lint and derived timings | PASS / FAIL | No |
+| `validate [--json] [--envelope]` | about 1 s | precheck, plus DB-03 (a 2-cycle run under Landlock with the audit hook recording; no file outside the output dir changed) and DB-04 (ledger provenance with zero `DAEMON_ERROR`) | PASS / FAIL | No |
+| `battery [--envelope]` | about 15 s | every registered check (DB-01 to DB-25; DB-19, 21, 23 reserved) | PASS / FAIL / INCOMPLETE | **Only a qualifying report** (full battery, PASS), then a human Class C ruling |
+
+Contract 5 swapped the first two names so the profiles nest in the order they run (precheck ⊂ validate ⊂ battery); the CLI says so on stderr for one release. All three write one report shape, `spark-daemon-report/1`, which holds facts only; the verdict and "qualifies" are derived on read. The installable unit is a projection of a qualifying battery report: `unit --report R` refuses unless the report qualifies and was made on this host, and the runtime refuses to start the unit if the manifest, `daemon.py` or contract differ from those it names.
 
 The battery quotes the envelope as well. An envelope that does not match the files the battery ran cannot yield PASS (INCOMPLETE), because the report would be about different bytes than the candidate claims.
 
@@ -96,8 +98,8 @@ Nothing here builds that subsystem. This is the protocol it would follow, so its
 1. `describe` → keep `contract_version` and `contract_sha256`. Read `contract.code` and `contract.ctx`: that is the whole interface.
 2. `scaffold --name N --dir D` → a folder that already passes the battery 18/18. Edit only `daemon.py` and the manifest's `purpose`, `reads`, `trigger`, `ledger.event_types`, `digest`. Imitate the closest reference daemon (table below).
 3. `envelope --producer-kind model --producer-id <run id>` after every edit.
-4. `validate --json --envelope` until `valid`. Diagnostics carry `layer`, `where` (manifest field or `daemon.py`) and `line`.
-5. `precheck --envelope` until `OK`.
+4. `precheck --json --envelope` until `RESULT: PASS`. Diagnostics carry `layer`, `where` (manifest field or `daemon.py`) and `line`.
+5. `validate --envelope` until `RESULT: PASS`.
 6. `battery --envelope` once. The report goes to a human, with the envelope, the diff against the closest reference daemon, and the install plan (`unit --plan`).
 7. Stop. Activation is Class C.
 

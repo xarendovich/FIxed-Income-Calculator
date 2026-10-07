@@ -15,7 +15,6 @@ MANIFEST_SCHEMA = "spark-daemon-manifest/4"
 # daemon itself runs no program at all.
 SYSTEM_PATH = "/usr/bin:/bin"
 LEDGER_SCHEMA = "spark-daemon-ledger/1"
-BATTERY_SCHEMA = "spark-daemon-battery/2"
 
 # Event types the skeleton itself writes. A manifest may not declare them.
 RESERVED_EVENT_TYPES = (

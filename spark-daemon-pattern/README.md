@@ -59,7 +59,9 @@ spark-daemon-pattern/
                             versions.json (append-only contract_version -> contract_sha256)
   spark_daemon/
     contract.py             the daemon contract and the manifest JSON Schema, from the enforced rules (r3)
-    handoff.py              candidate envelopes, validate --json, precheck (r3)
+    handoff.py              candidate envelopes (r3)
+    judge.py                one check registry, three nested profiles, one facts-only report (r4.11, contract 5)
+    qualify.py              the gates' shared facts: expected digests and host facts
     scaffold.py             a blank page that passes the battery (r3)
     manifest.py             the closed-schema manifest and its validator
     runtime.py              the skeleton: start-up order, cycle loop, lifecycle events
@@ -73,7 +75,7 @@ spark-daemon-pattern/
     purity.py               static check of the daemon's code before import
     unitgen.py              sandboxed systemd unit and human install plan (text only)
     battery.py, probes.py   the conformance battery and its child-process probes
-    cli.py                  describe | schema | scaffold | envelope | validate | precheck |
+    cli.py                  describe | schema | scaffold | envelope | precheck | validate |
                             battery | unit | run | verify (+ internal probes)
   examples/                 three reference daemons, one idiom each (DAEMON-CONTRACT.md section 7):
     meminfo-watch/          GB10 unified-memory bands from /proc
@@ -91,21 +93,20 @@ Requirements: Linux, Python 3.10 or later (tested on 3.10, 3.11, 3.12.3, the DGX
 
 ```bash
 cd spark-daemon-pattern
-python3 -I -B bin/spark-daemon validate --manifest examples/meminfo-watch/manifest.json
-python3 -I -B bin/spark-daemon unit --manifest examples/meminfo-watch/manifest.json          # prints the unit
+python3 -I -B bin/spark-daemon precheck --manifest examples/meminfo-watch/manifest.json      # static checks, milliseconds
+python3 -I -B bin/spark-daemon validate --manifest examples/meminfo-watch/manifest.json      # + a short confined run, ~1 s
+python3 -I -B bin/spark-daemon unit --manifest examples/meminfo-watch/manifest.json          # a PREVIEW of the unit
 python3 -I -B bin/spark-daemon unit --plan --manifest examples/meminfo-watch/manifest.json   # prints the install plan
-#   unit is a PREVIEW since r4.11; options (--require-path, --part-of) are passed to the battery
-python3 -I -B bin/spark-daemon battery --manifest examples/meminfo-watch/manifest.json       # ~15 s, disposable workspace
-python3 -I -B bin/spark-daemon battery --manifest examples/meminfo-watch/manifest.json --emit-unit /tmp/q   # r4.11: unit + record on a qualifying PASS
-python3 -I -B bin/spark-daemon qualified --unit /tmp/q/spark-daemon-meminfo-watch.service --record /tmp/q/spark-daemon-meminfo-watch.service.qualification.json
+python3 -I -B bin/spark-daemon battery --manifest examples/meminfo-watch/manifest.json --workdir /tmp/b   # ~15 s; unit inputs (--require-path, --part-of, --python) go here
+python3 -I -B bin/spark-daemon unit --report /tmp/b/battery-report.json --out /tmp/q        # contract 5: the installable unit, projected from a qualifying report
 python3 -I -B bin/spark-daemon status --manifest examples/meminfo-watch/manifest.json        # r4.11: state, verified independently
 python3 -B -m unittest discover -s tests -t tests                                             # ~65 s (or: make test)
 
 # Authoring and handoff (r3)
 python3 -I -B bin/spark-daemon describe --identity                                            # contract_version, contract_sha256
 python3 -I -B bin/spark-daemon scaffold --name my-watch --dir /tmp/my-watch                   # blank page; passes the battery
-python3 -I -B bin/spark-daemon validate --json --manifest /tmp/my-watch/manifest.json --envelope /tmp/my-watch/candidate.json
-python3 -I -B bin/spark-daemon precheck --manifest /tmp/my-watch/manifest.json                # ~1 s fast lane, answers OK/FAIL
+python3 -I -B bin/spark-daemon precheck --json --manifest /tmp/my-watch/manifest.json --envelope /tmp/my-watch/candidate.json
+python3 -I -B bin/spark-daemon validate --manifest /tmp/my-watch/manifest.json                # ~1 s: + a short confined run
 ```
 
 The battery works in a temporary folder with its own HOME, so it never touches your real output directory, `~/spark-core` or `~/spark-governance`.
@@ -228,7 +229,7 @@ Without the limit, a daemon that fails or waits every cycle keeps the watchdog h
 | DB-18 | `DAEMON_START.landlock` is honest (r2) | Its `abi` and `gaps` match a fresh in-process check on this host, for a clean single-cycle run |
 | DB-20 | The daemon observes (r4.5, HF-35) | Over 12 cycles against a blind limit of five test intervals, the heartbeats show accepted cycles and no `SENSE_BLIND` follows. DB-19 is reserved for the direct cgroup memory reading (PD-76) |
 
-The verdict is PASS only if nothing fails and nothing is UNKNOWN; otherwise FAIL or INCOMPLETE. N/A does not block a PASS (DB-17 when Landlock is unavailable). A JSON report (`spark-daemon-battery/1`) records every check, the seed, the environment and (r3) the contract identity. With `--envelope`, it also quotes the candidate envelope; if the envelope does not match the files that were run, the verdict cannot be PASS.
+The verdict is PASS only if nothing fails and nothing is UNKNOWN; otherwise FAIL or INCOMPLETE. N/A does not block a PASS (DB-17 when Landlock is unavailable). Every profile writes one report shape (`spark-daemon-report/1`, contract 5): facts only, namely every check's state and evidence, the seed, the environment, the host, the contract identity and every input of the unit generator. The verdict and whether the report qualifies are derived on read, never stored (E-10). The installable unit is a projection of a qualifying report (`unit --report`, E-11). With `--envelope`, it also quotes the candidate envelope; if the envelope does not match the files that were run, the verdict cannot be PASS.
 
 A daemon that reads under `~` ships a `fixture_home/` folder beside its manifest; the battery copies it into its disposable HOME, so the clean runs have something real to observe (see the reference daemons).
 
@@ -258,8 +259,8 @@ The full design is in `DAEMON-CONTRACT.md`; in brief:
 | Pattern → author | The manifest JSON Schema | `schema`, `contract/manifest.schema.json` |
 | Pattern → author | A blank page that already passes the battery | `scaffold` |
 | Author → pattern | A candidate folder with `candidate.json` (`spark-daemon-candidate/1`): contract targeted, file digests, producer, intent; no result fields | `envelope` |
-| Pattern → author | Feedback: `spark-daemon-validate/1` (ms), `spark-daemon-precheck/1` (~1 s, OK/FAIL) | `validate --json`, `precheck` |
-| Pattern → human | Evidence: `spark-daemon-battery/1` (~15 s); only its PASS is admissible | `battery --envelope` |
+| Pattern → author | Feedback: `spark-daemon-report/1` from the precheck (ms) and validate (~1 s) profiles | `precheck --json`, `validate` |
+| Pattern → human | Evidence: `spark-daemon-report/1` from the battery (~15 s); only a qualifying report is admissible, and it projects the installable unit | `battery --envelope`, `unit --report` |
 
 ## Evidence from r3 (2026-09-27)
 
@@ -368,7 +369,7 @@ Recommendation: APPROVE. Decision: PENDING
 | r4.9 | 2026-10-06 | Claude | Freeze proposal (`FREEZE-PROPOSAL-R4.9.md`, PD-99 to PD-108, proposed): freeze a class-1a observer core of four contracts (manifest, author API, ledger, battery verdict) and one activation chain. Three boundaries to move: forbid a denied path inside a granted read so the kernel expresses the whole policy (closes F-1 by construction); treat purity and the audit hook as diagnostics, the kernel as the boundary; make the generated unit the activation record, pinning a host PASS's digests. One independent ledger reader and a `status` command replace consumers' own parsing and Phase 1's notifier and staleness checker. Withdraws this repository's own exit-code split, C-1, `pacing` and the secret-name heuristic. Nine core invariants (INV-1 to INV-9), each with its check; every seam N-1 to N-23 closed, moved or removed. Measured start-up verification at about 28,000 records/s (`evidence/r4.9/`). Corrected r4.8's Python version (3.11.15, not 3.12). No code change. |
 | r4.10 | 2026-10-06 | Claude | Discovery guide for reviewers (`DISCOVERY-GUIDE-R4.10.md`): the scope in one sentence and the eight boundaries its words create; all 37 `HARDENING.md` entries grouped by boundary (15 sit on two edges, reading under a deny policy and running commands, including all four Critical defects); for each boundary, the chain of decisions and defects that led to its seams, questions to answer before reading ours, our r4.9 answer and a simpler one found by looking back, with what would make it wrong. Six lessons (LS-1 to LS-6). Eight candidate refinements (R-1 to R-8), not adopted: drop `deny`; no commands in the core; only the battery emits a unit; one blindness function; tail-only start-up verification (owner); a declared cycle budget; one judge; a neutral core name. No code change. |
 | r4.11 | 2026-10-06 | Claude | Implemented the owner's r4.9 rulings (`ADJUDICATION-R4.9-OWNER.md`; record in `ADJUDICATION-R4.9-OWNER-IMPLEMENTATION.md`). **Contract 4.0.0** (manifest schema 3, report schemas 2). R-7: one judge (`judge.py`), with validate, precheck and battery as profiles; DB-24, DB-25. R-3: installable units only from a qualifying battery PASS (`battery --emit-unit`, `qualified`); the runtime refuses unqualified starts outside test mode. R-1: `deny` removed; no read may contain an always-denied path. R-2b: execute only on declared executables and their loaders (residual recorded). R-6: `cycle_budget_seconds` with a per-cycle deadline and derived unit timings. R-4: shared interpreter (`semantics.py`), `status`, an independent verifier, DB-22. R-8b: rename map and three-hash binding (`vendoring/`). R-5c gated: no trustworthy checkpoint anchor exists, so full start-up verification stays. Fixed HF-38 (a boolean `seq` verified as 1), HF-39 (battery report bound the rewritten workspace manifest) and HF-40 (a command could outlive its cycle when the alarm fired inside `proc`'s cleanup). Design review package `REVIEW-PACKAGE-R4.11.md`: eleven seams and nine candidate simplifications. Candidate 926720f: 267 of 267 self-tests, none skipped; 4 x 22 of 22 battery checks. |
-| r4.12 (cut 1 of 5) | 2026-10-07 | Claude | The v5 simplification, adjudicated in `ADJUDICATION-V5.md` and authorized by the owner. **Cut 1, full R-2 and E-2:** a daemon runs no program. Removed: the manifest's `commands` (manifest schema 4, with a field-by-field migration from schemas 2 and 3), `proc.py`, `ctx.run`, `ctx.git`, the per-call time left, every Landlock execute grant, and the `/dev/null` grant and audit-hook exemption that served only commands. The audit hook refuses every spawn. `git-watch` left the reference set. The R-2b loader residual is closed and tested. Contract reports `5.0.0-dev` until cut 5. 245 of 245 self-tests, none skipped (267 at `a3599fd`; every change listed in `evidence/v5/cut1-accounting.md`); 3 × 22 battery checks (21 PASS, DB-24 N/A). |
+| r4.12 (cuts 1 and 2 of 5) | 2026-10-07 | Claude | The v5 simplification, adjudicated in `ADJUDICATION-V5.md` and authorized by the owner. **Cut 1, full R-2 and E-2:** a daemon runs no program. Removed: the manifest's `commands` (manifest schema 4, with a field-by-field migration from schemas 2 and 3), `proc.py`, `ctx.run`, `ctx.git`, the per-call time left, every Landlock execute grant, and the `/dev/null` grant and audit-hook exemption that served only commands. `git-watch` left the reference set. The R-2b loader residual is closed and tested. **Cut 2, the report and the unit:** the profiles nest as they run (precheck ⊂ validate ⊂ battery; the first two names swapped, with a notice). One facts-only report, `spark-daemon-report/1`, whose verdict and qualification are derived on read (E-10). The installable unit is a projection of a qualifying report (`unit --report`, E-11): installing checks qualification and host, and the runtime checks the files. `--emit-unit`, the qualification record and `qualified` are removed. Fixed **HF-41**: the emitted unit named the battery's disposable workspace as the daemon's home. Contract reports `5.0.0-dev` until cut 5. 248 of 248 self-tests, none skipped (267 at `a3599fd`; every change in `evidence/v5/cut1-accounting.md` and `cut2-accounting.md`); 3 × 22 battery checks (21 PASS, DB-24 N/A). |
 | r4.6 | 2026-09-30 | Claude | Reviewed and adjudicated hardening recommendations on screening before execution and runtime boundaries (`HARDENING-REVIEW-R4.6.md`, PD-93 to PD-98; subject to the owner). Fixed **HF-36** (Medium): the Landlock domain granted execute wherever it granted read, including the output directory, so a binary written there or dropped into a watched folder could be run if the in-process layers were bypassed (reproduced under ABI 7); execute now stays on system paths only. Rejected a disassembly gate for `svc`/`syscall` (every binary makes system calls; it would refuse everything or be evaded; it adds hostile-input parsing to the trusted side) in favour of execute-denial and digest-pinned executables. Reshaped ELF parsing into an activation-time battery check. Corrected two claims: Landlock restricts TCP `bind`/`connect`, not `socket()`, and the unit closes the network; WASM fuel bounds CPU only, and has no `fork`. Recorded F-1 (simulated): a directory swapped for a symlink between `ctx.read_text`'s check and its open can reach a denied subtree inside a declared read, outside systemd; fix planned as a check after opening. Credential stores and secret-shaped names to be denied in contract 4.0.0. 211 of 211 self-tests; 4 × 19 of 19 battery checks. |
 | r4.7 | 2026-10-01 | Claude | Fixed **HF-37** (Medium), found while porting the pattern to its first real project: precheck bound the original manifest instead of the workspace copy, so a daemon with an absolute `output_dir` failed precheck ("no ledger") while the battery passed it 19 of 19. 212 of 212 self-tests. |
 | r4.8 | 2026-10-06 | Claude | Brought back what the first pilot project added to its copy of the pattern: `unit --require-path` (`ConditionPathExists=`, so a daemon writing to a locked drive is skipped, not stopped fail-closed) and `unit --part-of` (`PartOf=`/`After=`/`WantedBy=`, so a daemon whose open ledger would keep a drive busy stops before the unit that owns the drive and starts with it; the name is checked, so it cannot inject a directive); one `proc.SYSTEM_PATH` in place of the command search path written out in 17 places; `tests/conftest.py`, so test-module import order does not matter; and a parser-based count of git-watch's Git calls, so line wrapping cannot change it. The pilot's owner kept the generated unit's restart-on-crash and has the project tell them about each restart and each stop that needs a person. Refreshed the reviewer package (`REVIEW-PACKAGE-R4.8.md`, superseding the r4.4 and r4.5 status and seam tables), with five new seams traced from the first deployment (N-19 to N-23). Contract unchanged (3.1.0). 214 of 214 self-tests, none skipped; 4 × 19 of 19 battery checks. |

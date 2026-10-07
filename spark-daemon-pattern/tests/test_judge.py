@@ -1,6 +1,7 @@
-"""The one judge (r4.11, R-7): validate, precheck and the battery are profiles of one check
+"""The one judge (r4.11, R-7): precheck, validate and the battery are profiles of one check
 registry with one verdict rule. These are the acceptance tests of the owner's r4.9 handoff,
-Phase A."""
+Phase A. Since contract 5 the profiles nest in the order they run (precheck within validate
+within battery) and every profile writes the one report, whose verdict is derived on read."""
 
 import os
 import re
@@ -8,7 +9,7 @@ import unittest
 from unittest import mock
 
 from helpers import EXAMPLE, FIXTURES
-from spark_daemon import battery, handoff, judge
+from spark_daemon import battery, cli, handoff, judge, qualify
 
 OPENER = os.path.join(FIXTURES, "opener", "manifest.json")      # impure: calls open()
 GOOD = os.path.join(EXAMPLE, "manifest.json")
@@ -26,22 +27,21 @@ class RegistryTests(unittest.TestCase):
             self.assertNotIn(reserved, ids)
 
     def test_profiles_nest_and_the_battery_runs_everything(self):
-        validate, precheck, full = (set(judge.profile_ids(p)) for p in ("validate", "precheck", "battery"))
-        self.assertLess(validate, precheck)
-        self.assertLess(precheck, full)
+        precheck, validate, full = (set(judge.profile_ids(p)) for p in ("precheck", "validate", "battery"))
+        self.assertLess(precheck, validate)
+        self.assertLess(validate, full)
         self.assertEqual(full, set(judge.registry()))
 
-    def test_validate_starts_no_process_and_precheck_needs_no_extra_tool(self):
+    def test_precheck_starts_no_process_and_validate_needs_no_extra_tool(self):
         reg = judge.registry()
-        self.assertTrue(all(reg[i].kind == "static" for i in judge.profile_ids("validate")))
-        # DB-08/09 need strace and DB-15 systemd-analyze; precheck must not depend on them.
-        self.assertFalse({"DB-08", "DB-09", "DB-15"} & set(judge.profile_ids("precheck")))
+        self.assertTrue(all(reg[i].kind == "static" for i in judge.profile_ids("precheck")))
+        # DB-08/09 need strace and DB-15 systemd-analyze; validate must not depend on them.
+        self.assertFalse({"DB-08", "DB-09", "DB-15"} & set(judge.profile_ids("validate")))
 
-    def test_only_the_full_battery_qualifies(self):
-        for profile, quick, expected in (("validate", False, False), ("precheck", False, False),
-                                         ("battery", True, False), ("battery", False, True)):
-            with self.subTest(profile=profile, quick=quick):
-                self.assertEqual(judge.Judgement(profile, GOOD, quick=quick).qualifying, expected)
+    def test_the_renamed_profiles_say_so(self):
+        self.assertEqual(sorted(judge.RENAMED), ["precheck", "validate"])
+        self.assertIn("were called validate", judge.RENAMED["precheck"])
+        self.assertIn("was called precheck", judge.RENAMED["validate"])
 
     def test_one_verdict_rule(self):
         self.assertEqual(judge.verdict(["PASS", "N/A", "SKIPPED"]), "PASS")
@@ -55,7 +55,7 @@ class OneInvariantOneIdTests(unittest.TestCase):
 
     def test_impure_code_fails_db02_identically_everywhere(self):
         seen = {}
-        for profile in ("validate", "precheck", "battery"):
+        for profile in ("precheck", "validate", "battery"):
             j = judge.run(profile, OPENER)
             c = by_id(j.checks)["DB-02"]
             self.assertEqual((j.result, c.state), ("FAIL", "FAIL"), profile)
@@ -69,7 +69,7 @@ class OneInvariantOneIdTests(unittest.TestCase):
         def broken(j, c):
             c.state, c.evidence = "FAIL", "mutated unit lint"
         with mock.patch.object(judge, "_db25", broken):
-            for profile in ("validate", "precheck", "battery"):
+            for profile in ("precheck", "validate", "battery"):
                 with self.subTest(profile=profile):
                     j = judge.run(profile, GOOD)
                     self.assertEqual(j.result, "FAIL")
@@ -78,12 +78,13 @@ class OneInvariantOneIdTests(unittest.TestCase):
 
 class NoStandaloneJudgeTests(unittest.TestCase):
     def test_validate_and_precheck_take_their_verdict_from_the_judge(self):
+        reports = [judge.report(judge.run(p, GOOD)) for p in ("precheck", "validate")]
         with mock.patch.object(judge, "verdict", lambda states: "INCOMPLETE"):
-            self.assertEqual(handoff.validate_report(GOOD)[0]["result"], "INCOMPLETE")
-            self.assertEqual(handoff.precheck_report(GOOD)["result"], "INCOMPLETE")
+            for rep in reports:
+                self.assertEqual(judge.conclusions(rep)["result"], "INCOMPLETE")
 
     def test_no_module_but_the_judge_decides_a_verdict(self):
-        for module in (handoff, battery):
+        for module in (handoff, battery, cli, qualify):
             with open(module.__file__) as fh:
                 source = fh.read()
             self.assertNotIn('"INCOMPLETE"', source, module.__name__)
@@ -103,10 +104,13 @@ class NoStandaloneJudgeTests(unittest.TestCase):
             with open(os.path.join(tmp, "manifest.json"), "w") as fh:
                 json.dump(data, fh)
             shutil.copy(os.path.join(EXAMPLE, "daemon.py"), tmp)
-            j = judge.run("precheck", os.path.join(tmp, "manifest.json"))
+            j = judge.run("validate", os.path.join(tmp, "manifest.json"))
             from spark_daemon import manifest
             self.assertEqual(j.m.sha256, manifest.load(os.path.join(tmp, "manifest.json")).sha256)
             self.assertNotEqual(j.ws.m.sha256, j.m.sha256)
+            rep = judge.report(j)
+            self.assertEqual(rep["manifest_sha256"], j.m.sha256)
+            self.assertEqual(rep["manifest"]["output_dir"], "/srv/example/logs/meminfo-watch")
             self.assertEqual(j.result, "PASS", [(c.id, c.state, c.evidence) for c in j.checks])
         finally:
             shutil.rmtree(tmp)

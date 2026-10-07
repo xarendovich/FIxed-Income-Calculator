@@ -14,12 +14,15 @@ def home() -> str:
     return os.path.realpath(value)
 
 
-def expand(path: str) -> str:
-    """Expand "~" and make the path absolute and canonical (symlinks resolved)."""
+def expand(path: str, base: str | None = None) -> str:
+    """Expand "~" (to base when given, otherwise home()) and make the path absolute and
+    canonical (symlinks resolved). The unit generator passes base explicitly (HF-41), so a unit
+    never depends on the environment of the process that happens to generate it."""
+    top = home() if base is None else os.path.realpath(base)
     if path == "~":
-        path = home()
+        path = top
     elif path.startswith("~/"):
-        path = os.path.join(home(), path[2:])
+        path = os.path.join(top, path[2:])
     return os.path.realpath(path)
 
 

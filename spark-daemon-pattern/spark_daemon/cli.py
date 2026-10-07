@@ -1,7 +1,8 @@
 """Command line.
 
-Authoring and handoff: describe | schema | scaffold | envelope | validate | precheck
-Evidence and operation: battery | qualified | unit (a preview) | run | verify | status
+Authoring and handoff: describe | schema | scaffold | envelope
+Evidence: precheck (static) | validate (+ a short confined run) | battery (qualifies), one report shape
+Operation: unit (--report: the installable unit; --manifest: a preview) | run | verify | status
 Internal (the battery's child processes): probe-policy | probe-landlock | probe-digest
 """
 
@@ -34,20 +35,26 @@ def main(argv=None) -> int:
     p.add_argument("--producer-id", required=True)
     p.add_argument("--intent", required=True)
 
-    p = sub.add_parser("validate", help="validate a manifest, the purity of its daemon.py and a candidate envelope")
+    p = sub.add_parser("precheck", help="the static checks: manifest, purity, envelope, unit (milliseconds; no process is started)")
     p.add_argument("--manifest", required=True)
     p.add_argument("--envelope", default=None, help="candidate.json to check against the files and the contract")
-    p.add_argument("--json", action="store_true", help="print a spark-daemon-validate/1 report")
+    p.add_argument("--json", action="store_true", help="print the report (spark-daemon-report/1)")
 
-    p = sub.add_parser("precheck", help="fast pre-battery lane: validate plus a short confined run (JSON report)")
+    p = sub.add_parser("validate", help="precheck plus a short confined run and its ledger (seconds)")
     p.add_argument("--manifest", required=True)
     p.add_argument("--envelope", default=None)
     p.add_argument("--workdir", default=None)
+    p.add_argument("--json", action="store_true", help="print the report (spark-daemon-report/1)")
 
-    p = sub.add_parser("unit", help="print a PREVIEW of the unit, or the install plan (never installs; not installable: see battery --emit-unit)")
-    p.add_argument("--manifest", required=True)
+    p = sub.add_parser("unit", help="print the installable unit projected from a qualifying battery report, "
+                                    "or a PREVIEW from a manifest (never installs)")
+    source = p.add_mutually_exclusive_group(required=True)
+    source.add_argument("--report", help="a battery report: the unit is reproduced from it alone, if it qualifies "
+                                         "and was made on this host")
+    source.add_argument("--manifest", help="a PREVIEW, which the runtime refuses to start outside test mode")
+    p.add_argument("--out", default=None, metavar="DIR", help="with --report: write DIR/<unit name> instead of printing")
     p.add_argument("--python", default="/usr/bin/python3")
-    p.add_argument("--plan", action="store_true", help="print the install plan instead of the unit")
+    p.add_argument("--plan", action="store_true", help="with --manifest: print the install plan instead of the unit")
     p.add_argument("--require-path", action="append", default=[],
                    help="a path that must exist for the unit to start (ConditionPathExists=); repeatable")
     p.add_argument("--part-of", default=None,
@@ -68,24 +75,18 @@ def main(argv=None) -> int:
     p.add_argument("--manifest", required=True)
     p.add_argument("--json", action="store_true")
 
-    p = sub.add_parser("battery", help="run the conformance battery in a disposable workspace")
+    p = sub.add_parser("battery", help="run the conformance battery in a disposable workspace (the qualifying profile)")
     p.add_argument("--manifest", required=True)
     p.add_argument("--seed", type=int, default=20260927)
-    p.add_argument("--quick", action="store_true")
+    p.add_argument("--quick", action="store_true", help="fewer crash trials; never qualifies")
     p.add_argument("--workdir", default=None)
     p.add_argument("--threshold", type=int, default=20, help="systemd-analyze exposure threshold in tenths (20 = 2.0)")
-    p.add_argument("--envelope", default=None, help="candidate.json to quote in the report")
-    p.add_argument("--emit-unit", default=None, metavar="DIR",
-                   help="on a qualifying PASS (not --quick), write the installable unit and its "
-                        "qualification record into DIR; nothing is installed or enabled")
+    p.add_argument("--envelope", default=None, help="candidate.json to check and quote in the report")
+    p.add_argument("--json", action="store_true", help="print the report instead of the check lines")
     p.add_argument("--require-path", action="append", default=[],
-                   help="unit option: a path that must exist for the unit to start; repeatable")
-    p.add_argument("--part-of", default=None, help="unit option: start and stop with this unit")
-    p.add_argument("--python", default="/usr/bin/python3", help="unit option: the interpreter the unit runs")
-
-    p = sub.add_parser("qualified", help="check a unit against its qualification record, the files and this host")
-    p.add_argument("--unit", required=True)
-    p.add_argument("--record", required=True)
+                   help="unit input: a path that must exist for the unit to start; repeatable")
+    p.add_argument("--part-of", default=None, help="unit input: start and stop with this unit")
+    p.add_argument("--python", default="/usr/bin/python3", help="unit input: the interpreter the unit runs")
 
     p = sub.add_parser("probe-policy", help=argparse.SUPPRESS)
     p.add_argument("--manifest", required=True)
@@ -139,36 +140,21 @@ def main(argv=None) -> int:
         print(f"envelope sha256 {handoff.envelope_sha256(env)}")
         return EXIT_OK
 
-    if args.command == "validate":
-        from . import handoff
-        report, _ = handoff.validate_report(args.manifest, args.envelope)
-        if args.json:
-            print(json.dumps(report, indent=2, ensure_ascii=False))
-        else:
-            for d in report["diagnostics"]:
-                where = d["where"] + (f":{d['line']}" if d["line"] else "")
-                prefix = "" if d["severity"] == "error" else "warning: "
-                print(f"{d['layer']}: {prefix}{where}: {d['message']}" if where else f"{d['layer']}: {d['message']}")
-            if report["manifest_sha256"]:
-                print(f"manifest sha256 {report['manifest_sha256']}")
-            if report["candidate"]:
-                print(f"candidate envelope sha256 {report['candidate']['envelope_sha256']} "
-                      f"(contract {report['candidate']['contract_match']})")
-            print(f"RESULT: {report['result']}")
+    if args.command in ("precheck", "validate"):
         from . import judge
-        return judge.exit_code(report["result"])
-
-    if args.command == "precheck":
-        from . import handoff
         if not os.path.exists(args.manifest):
             print(f"no manifest at {args.manifest}", file=sys.stderr)
             return EXIT_USAGE
-        report = handoff.precheck_report(args.manifest, args.envelope, args.workdir)
-        print(json.dumps(report, indent=2, ensure_ascii=False))
-        from . import judge
-        return judge.exit_code(report["result"])
+        print(f"note: {judge.RENAMED[args.command]}", file=sys.stderr)        # contract 5, for one release
+        options = {"envelope": args.envelope}
+        if args.command == "validate":
+            options["workdir"] = args.workdir
+        j = judge.run(args.command, args.manifest, **options)
+        return judge.print_report(judge.report(j), as_json=args.json)
 
     if args.command == "unit":
+        if args.report:
+            return _unit_from_report(args)
         from . import manifest, unitgen
         try:
             m = manifest.load(args.manifest)
@@ -252,18 +238,9 @@ def main(argv=None) -> int:
     if args.command == "battery":
         from . import battery
         return battery.main(args.manifest, seed=args.seed, quick=args.quick, workdir=args.workdir,
-                            threshold=args.threshold, envelope=args.envelope, emit_unit=args.emit_unit,
+                            threshold=args.threshold, envelope=args.envelope, as_json=args.json,
                             unit_options={"python": args.python, "require_paths": args.require_path,
                                           "part_of": args.part_of})
-
-    if args.command == "qualified":
-        from . import qualify
-        problems = qualify.check(args.unit, args.record)
-        for problem in problems:
-            print(f"not qualified: {problem}")
-        print("RESULT: NOT QUALIFIED" if problems else
-              "RESULT: QUALIFIED (evidence for an activation decision; it activates nothing)")
-        return EXIT_FAILED if problems else EXIT_OK
 
     if args.command == "probe-policy":
         from . import probes
@@ -277,3 +254,45 @@ def main(argv=None) -> int:
         from . import probes
         return probes.probe_digest(args.manifest, args.seed)
     return EXIT_USAGE
+
+
+def _unit_from_report(args) -> int:
+    """The installer's gate and the projection (contract 5, E-11): the report must qualify and
+    have been made on this host; the unit is then reproduced from the report alone. Whether
+    the files still match is the runtime's check, at every start."""
+    from . import judge, qualify
+    from .canonical import strict_loads
+    if args.plan or args.require_path or args.part_of or args.python != "/usr/bin/python3":
+        print("unit --report takes its inputs from the report; set them on the battery instead", file=sys.stderr)
+        return EXIT_USAGE
+    try:
+        with open(args.report, "rb") as fh:
+            rep = strict_loads(fh.read(4 * 1024 * 1024))
+    except (OSError, ValueError) as e:
+        print(f"not installable: no readable report at {args.report} ({e.__class__.__name__})", file=sys.stderr)
+        return EXIT_FAILED
+    problems = []
+    if isinstance(rep, dict):
+        problems += judge.conclusions(rep)["why_not"] + qualify.host_differences(rep.get("host"))
+    else:
+        problems.append("the report is not an object")
+    if not problems:
+        try:
+            name, text = judge.unit_from_report(rep)
+        except ValueError as e:
+            problems.append(str(e))
+    if problems:
+        for problem in problems:
+            print(f"not installable: {problem}", file=sys.stderr)
+        return EXIT_FAILED
+    if args.out:
+        os.makedirs(args.out, exist_ok=True)
+        path = os.path.join(args.out, name)
+        with open(path, "w") as fh:
+            fh.write(text)
+        print(path)
+    else:
+        print(text, end="")
+    print("note: a qualified unit is evidence for an activation decision; installing and enabling it are "
+          "a person's decision", file=sys.stderr)
+    return EXIT_OK

@@ -1,0 +1,246 @@
+{
+  "schema": "spark-daemon-report/1",
+  "skeleton_version": "0.3.0",
+  "contract_version": "5.0.0-dev",
+  "contract_sha256": "f24b61333f48c6dfcf6633aa8427eac3fbbba5216c86873bb3ed212cd3bf9222",
+  "profile": "battery",
+  "quick": false,
+  "seed": 20260927,
+  "daemon": "meminfo-watch",
+  "manifest_path": "/home/user/FIxed-Income-Calculator/spark-daemon-pattern/examples/meminfo-watch/manifest.json",
+  "manifest_sha256": "b300618d57fda86630edd6853fa26b5ba7fe81b7f4317c1e99bccf1473e0ca03",
+  "manifest": {
+    "manifest_schema": "spark-daemon-manifest/4",
+    "name": "meminfo-watch",
+    "version": "0.1.0",
+    "purpose": "Records when unified-memory headroom moves between bands, from /proc/meminfo and memory pressure (PSI).",
+    "daemon_class": "observe",
+    "trigger": {
+      "kind": "poll",
+      "interval_seconds": 30
+    },
+    "reads": [
+      "/proc/meminfo",
+      "/proc/pressure/memory"
+    ],
+    "output_dir": "~/spark-daemons/meminfo-watch",
+    "network": {
+      "mode": "none"
+    },
+    "run_as": {
+      "unit": "system",
+      "user": "spark-meminfo"
+    },
+    "resources": {
+      "cpu_weight": 10,
+      "cpu_budget_bp": 100,
+      "memory_max_mb": 64,
+      "tasks_max": 8,
+      "io_class": "idle"
+    },
+    "cycle_budget_seconds": 40,
+    "blind_limit_seconds": 1800,
+    "ledger": {
+      "record_max_bytes": 8192,
+      "event_types": [
+        "MEMORY_OBSERVATION_BASELINE",
+        "MEMORY_BAND_CHANGED"
+      ]
+    },
+    "digest": {
+      "enabled": true,
+      "max_bytes": 8192
+    }
+  },
+  "daemon_code_sha256": "cb5c9d74a1337f206b3ad4d555c8d8fd4127a4dd6c803aa96e3e309836ffc077",
+  "candidate": null,
+  "unit": {
+    "pattern_root": "/home/user/FIxed-Income-Calculator/spark-daemon-pattern",
+    "python": "/usr/bin/python3",
+    "require_paths": [],
+    "part_of": null,
+    "spark_daemon_home": "/root",
+    "unit_name": "spark-daemon-meminfo-watch.service",
+    "expect": {
+      "manifest_sha256": "b300618d57fda86630edd6853fa26b5ba7fe81b7f4317c1e99bccf1473e0ca03",
+      "daemon_code_sha256": "cb5c9d74a1337f206b3ad4d555c8d8fd4127a4dd6c803aa96e3e309836ffc077",
+      "contract_sha256": "f24b61333f48c6dfcf6633aa8427eac3fbbba5216c86873bb3ed212cd3bf9222"
+    },
+    "unit_sha256": "4a5408bb729aabab4084ac74acbe8b4f111f6e48988f41184c94ae5a772cd25d"
+  },
+  "host": {
+    "kernel": "6.18.44-fc-v77",
+    "machine": "x86_64",
+    "landlock_abi": 7,
+    "cgroup": "v1",
+    "systemd": "systemd 255 (255.4-1ubuntu8.14)",
+    "machine_id_sha256": "a3b522eaa6f7dd890deea9529dc6f8ccc4e55f99fcece68d3d6a08001dfac3db"
+  },
+  "environment": {
+    "python": "3.11.15",
+    "kernel": "6.18.44-fc-v77",
+    "machine": "x86_64",
+    "strace": true,
+    "systemd_analyze": true
+  },
+  "workspace": "/home/user/FIxed-Income-Calculator/spark-daemon-pattern/battery-runs/meminfo-watch",
+  "workspace_manifest_sha256": "b300618d57fda86630edd6853fa26b5ba7fe81b7f4317c1e99bccf1473e0ca03",
+  "rewrites": [],
+  "checks": [
+    {
+      "id": "DB-01",
+      "title": "manifest validates",
+      "state": "PASS",
+      "evidence": "manifest sha256 b300618d57fda866",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-02",
+      "title": "purity check",
+      "state": "PASS",
+      "evidence": "no findings",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-03",
+      "title": "confinement",
+      "state": "PASS",
+      "evidence": "5 cycles; 0 audit events; no file outside the output directory changed",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-04",
+      "title": "ledger integrity and provenance",
+      "state": "PASS",
+      "evidence": "3 records; chain head 27aba1efee5c6ed1; provenance matches",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-05",
+      "title": "crash and restart",
+      "state": "PASS",
+      "evidence": "8 kills at [0.82, 0.464, 0.893, 0.111, 0.471, 0.87, 0.629, 0.314] s; 8 starts recorded, all after the first flagged unclean; 0 torn tail(s) quarantined; chain verifies",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-06",
+      "title": "torn-tail quarantine",
+      "state": "PASS",
+      "evidence": "both torn tails quarantined byte-for-byte, recorded, chain verifies",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-07",
+      "title": "refuses a corrupt ledger",
+      "state": "PASS",
+      "evidence": "flipped one byte in record 14: refused with exit 65, nothing changed",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-08",
+      "title": "fsync failure",
+      "state": "PASS",
+      "evidence": "exit 70 under injected fsync EIO; restart recovered; chain verifies (+4 records)",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-09",
+      "title": "disk-full failure",
+      "state": "PASS",
+      "evidence": "exit 70 under injected write ENOSPC; restart recovered; chain verifies (+3 records)",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-10",
+      "title": "digest containment",
+      "state": "PASS",
+      "evidence": "220 hostile renderings of this daemon's digest, seed 20260927; structure unchanged",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-11",
+      "title": "notify protocol",
+      "state": "PASS",
+      "evidence": "READY after DAEMON_START; 12 pings, longest gap 0.20 s; STOPPING at exit",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-12",
+      "title": "single instance and SIGTERM",
+      "state": "PASS",
+      "evidence": "second instance refused (73); SIGTERM gave DAEMON_STOP and exit 0",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-13",
+      "title": "audit hook blocks forbidden operations",
+      "state": "PASS",
+      "evidence": "10 forbidden operations blocked and counted; output-dir write allowed",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-14",
+      "title": "resource budget",
+      "state": "PASS",
+      "evidence": "7.37 ms CPU per cycle over 21 cycles, projected 0.025% at a 30 s interval (budget 1.00%); peak RSS 20.2 MiB (limit 64); whole process incl. start-up 345 ms CPU",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-15",
+      "title": "unit hardening",
+      "state": "PASS",
+      "evidence": "all required directives present; systemd-analyze offline exposure 0.4 (threshold 2.0); start-up syscalls permitted by the unit's seccomp filter",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-16",
+      "title": "read-only verification",
+      "state": "PASS",
+      "evidence": "two read-only verifications agree (seq 41, chain head 28f6dda12d0e4b0e); bytes and mtime unchanged",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-17",
+      "title": "Landlock blocks with the audit hook record-only",
+      "state": "PASS",
+      "evidence": "ABI 7: with the audit hook in record-only mode, the kernel alone still blocked the forbidden write and the denied read; TCP connect also blocked (EACCES)",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-18",
+      "title": "DAEMON_START.landlock matches host and manifest",
+      "state": "PASS",
+      "evidence": "DAEMON_START.landlock: ABI 7, status enforced, 0 gap(s); matches this host's ABI and the manifest's own gaps",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-20",
+      "title": "observes within a blind limit",
+      "state": "PASS",
+      "evidence": "10 accepted and 0 unsettled or failed cycle(s) across 3 heartbeat(s); no SENSE_BLIND within a 1000 ms limit",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-22",
+      "title": "a second, independent verifier agrees",
+      "state": "PASS",
+      "evidence": "both verifiers agree: own ledger intact to seq 3 (head a10349433b165436), and the same break on 5 damaged copies",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-24",
+      "title": "candidate envelope matches the files",
+      "state": "N/A",
+      "evidence": "no candidate envelope given",
+      "diagnostics": []
+    },
+    {
+      "id": "DB-25",
+      "title": "generated unit: every required directive, timings from the cycle budget",
+      "state": "PASS",
+      "evidence": "all 29 required directives present; watchdog 90 s and stop timeout 100 s derived from a 40 s cycle budget",
+      "diagnostics": []
+    }
+  ],
+  "authority": "Evidence only. This report installs, enables and activates nothing; activation is a separate decision by a person with that authority."
+}

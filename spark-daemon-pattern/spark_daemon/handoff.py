@@ -1,5 +1,4 @@
-"""The inbound half of the handoff: candidate envelopes, the structured validate report and
-the precheck fast lane.
+"""The inbound half of the handoff: candidate envelopes.
 
 Whatever produces a candidate daemon (a person, a script or a model) hands back a folder:
 
@@ -10,11 +9,11 @@ Whatever produces a candidate daemon (a person, a script or a model) hands back 
 The envelope names the exact files (sha256) and the contract they were built against
 (contract_version and contract_sha256, from `spark-daemon describe`). Its schema is closed
 and has no field for results, verdicts or approvals: a candidate cannot carry a claim about
-itself. validate and precheck answer with their own reports, which quote the envelope's
-digest the way a ProcessingObservation quotes the HandoffEnvelope it observed. Since r4.11
-both are profiles of the one judge (judge.py); the envelope is its check DB-24.
+itself. The judge's report (judge.py, spark-daemon-report/1) quotes the envelope's digest
+the way a ProcessingObservation quotes the HandoffEnvelope it observed; the envelope is the
+judge's check DB-24, in every profile.
 
-Reports use one diagnostic shape everywhere (modelled on `terraform validate -json`):
+Diagnostics have one shape everywhere (modelled on `terraform validate -json`):
     {"layer", "severity": "error"|"warning", "where", "line", "message"}
 """
 
@@ -24,8 +23,7 @@ import re
 from . import judge
 from . import manifest as mf
 from .canonical import CanonicalError, canonical_bytes, sha256_hex, strict_loads
-from .contract import (AUTHORITY, CANDIDATE_SCHEMA, PRECHECK_SCHEMA, VALIDATE_SCHEMA,
-                       contract_identity)
+from .contract import CANDIDATE_SCHEMA, contract_identity
 
 ENVELOPE_NAME = "candidate.json"
 ENVELOPE_MAX_BYTES = 16384
@@ -167,65 +165,3 @@ def check_envelope(envelope_path: str, directory: str):
                "contract_match": match,
                "producer": producer if isinstance(producer, dict) else None}
     return summary, diags
-
-
-# ---------------------------------------------------------------- validate and precheck
-#
-# r4.11 (R-7): both are profiles of the one judge (judge.py). These functions only shape its
-# result into their published report formats; they decide nothing themselves.
-
-def _identity(j):
-    return {"daemon": j.m.name if j.m else None,
-            "manifest_sha256": j.m.sha256 if j.m else None,
-            "daemon_code_sha256": j.code_sha,
-            "candidate": j.candidate}
-
-
-def _checks(j):
-    return [{"id": c.id, "title": c.title, "state": c.state, "evidence": c.evidence} for c in j.checks]
-
-
-def validate_report(manifest_path: str, envelope_path: str | None = None):
-    """Returns (report, manifest | None): the validate profile (DB-01, DB-02, DB-24, DB-25).
-    Milliseconds; no process is started."""
-    j = judge.run("validate", manifest_path, envelope=envelope_path)
-    diags = j.diagnostics()
-    errors = sum(1 for d in diags if d["severity"] == "error")
-    report = {
-        "schema": VALIDATE_SCHEMA,
-        **contract_identity(),
-        "profile": j.profile,
-        "qualifying": j.qualifying,
-        "result": j.result,
-        "valid": j.result == "PASS",
-        "error_count": errors,
-        "warning_count": len(diags) - errors,
-        **_identity(j),
-        "checks": _checks(j),
-        "diagnostics": diags,
-        "authority": AUTHORITY,
-    }
-    return report, j.m
-
-
-def precheck_report(manifest_path: str, envelope_path: str | None = None, workdir: str | None = None) -> dict:
-    """The precheck profile: validate's checks, then a short confined run in a disposable
-    workspace (DB-03 with two cycles) and the ledger's provenance (DB-04). Seconds; offline; no
-    tool beyond Python is needed. Its result is feedback for whoever is iterating, never
-    qualification: `qualifying` is false, and only the battery may emit an installable unit."""
-    j = judge.run("precheck", manifest_path, envelope=envelope_path, workdir=workdir)
-    return {
-        "schema": PRECHECK_SCHEMA,
-        **contract_identity(),
-        "profile": j.profile,
-        "qualifying": j.qualifying,
-        "result": j.result,
-        "activation_evidence": False,
-        **_identity(j),
-        "checks": _checks(j),
-        "diagnostics": j.diagnostics(),
-        "workspace": j.ws.root if j.ws else None,
-        "next": ("spark-daemon battery --manifest <manifest.json>" if j.result != "FAIL"
-                 else "fix the diagnostics"),
-        "authority": AUTHORITY,
-    }

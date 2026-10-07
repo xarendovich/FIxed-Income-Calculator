@@ -144,8 +144,11 @@ class BatteryTests(unittest.TestCase):
         ids = [c["id"] for c in report["checks"]]
         self.assertEqual(ids[-5:], ["DB-18", "DB-20", "DB-22", "DB-24", "DB-25"])   # DB-19, 21, 23 reserved
         self.assertEqual(len(ids), 22)
-        self.assertEqual((report["profile"], report["qualifying"]), ("battery", False))   # --quick
-        self.assertEqual(report["schema"], "spark-daemon-battery/2")
+        from spark_daemon import judge
+        self.assertEqual(report["schema"], "spark-daemon-report/1")
+        self.assertEqual((report["profile"], report["quick"]), ("battery", True))
+        self.assertFalse(judge.conclusions(report)["qualifies"])     # --quick never qualifies
+        self.assertIn("qualifies: no (a --quick battery does not qualify", p.stdout)
 
     def test_impure_daemon_fails(self):
         p = self.run_battery(os.path.join(FIXTURES, "opener", "manifest.json"))

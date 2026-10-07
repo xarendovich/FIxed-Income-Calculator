@@ -50,8 +50,8 @@ import threading
 import time
 from dataclasses import dataclass
 
-from . import (BATTERY_SCHEMA, EXIT_USAGE, LEDGER_NAME, SYSTEM_PATH,
-               QUARANTINE_DIR, RESERVED_EVENT_TYPES, VERSION, guard, landlock, ledger,
+from . import (EXIT_USAGE, LEDGER_NAME, SYSTEM_PATH,
+               QUARANTINE_DIR, RESERVED_EVENT_TYPES, guard, landlock, ledger,
                manifest as manifest_mod, unitgen)
 from .canonical import sha256_hex, strict_loads
 
@@ -597,8 +597,12 @@ def db22(ws, c):
                       f"{clean['head_sha256'][:16]}), and the same break on {len(copies)} damaged copies")
 
 
-def db15(ws, c, threshold, unit_options=None):
-    text = unitgen.generate(ws.m, root=PATTERN_ROOT, **(unit_options or {}))
+def db15(ws, c, threshold, text):
+    """Scores the unit the report binds: the one DB-25 generated before the workspace existed,
+    with the author's home and the expected digests (HF-41), not a unit of the workspace copy."""
+    if text is None:
+        c.state, c.evidence = "FAIL", "no unit: DB-25 could not generate one"
+        return
     missing = unitgen.lint(text)
     unit_path = os.path.join(ws.root, unitgen.unit_name(ws.m))
     with open(unit_path, "w") as fh:
@@ -735,16 +739,13 @@ def db18(ws, c):
 
 
 def main(manifest_path: str, *, seed: int, quick: bool, workdir: str | None, threshold: int,
-         envelope: str | None = None, unit_options: dict | None = None,
-         emit_unit: str | None = None) -> int:
-    """The battery profile of the one judge (judge.py, r4.11): every registered check. With
-    emit_unit, a qualifying PASS also writes the installable unit and its record (qualify.py)."""
-    from . import contract, judge, qualify
+         envelope: str | None = None, unit_options: dict | None = None, as_json: bool = False) -> int:
+    """The battery profile of the one judge: every registered check. Writes the report
+    (spark-daemon-report/1) into the workspace. An installable unit is a projection of a
+    qualifying report: `spark-daemon unit --report <report>` (contract 5, E-11)."""
+    from . import judge
     if not os.path.exists(manifest_path):
         print(f"no manifest at {manifest_path}")
-        return EXIT_USAGE
-    if emit_unit and quick:
-        print("--emit-unit needs the full battery: --quick does not qualify")
         return EXIT_USAGE
     j = judge.run("battery", manifest_path, envelope=envelope, workdir=workdir, seed=seed,
                   quick=quick, threshold=threshold, unit_options=unit_options)
@@ -753,47 +754,9 @@ def main(manifest_path: str, *, seed: int, quick: bool, workdir: str | None, thr
         j.ws.root = os.path.realpath(workdir or tempfile.mkdtemp(prefix="spark-battery-"))
         os.makedirs(j.ws.root, exist_ok=True)
         j.ws.rewrites, j.ws.m = [], None
-    envelope_check = next(c for c in j.checks if c.id == "DB-24")
-    candidate = None if envelope_check.state == judge.NA else {
-        "summary": j.candidate, "diagnostics": envelope_check.diagnostics}
-    report = {
-        "schema": BATTERY_SCHEMA, "skeleton_version": VERSION, **contract.contract_identity(),
-        "profile": j.profile, "qualifying": j.qualifying,
-        "candidate": candidate, "result": j.result, "seed": seed,
-        "quick": quick, "unit_options": j.unit_options, "host": qualify.host_facts(),
-        "daemon": j.m.name if j.m else None,
-        # The manifest as written, which is what a unit runs; run checks used the workspace's
-        # copy, whose digest differs when an absolute output_dir was rewritten.
-        "manifest_sha256": j.m.sha256 if j.m else None,
-        "workspace_manifest_sha256": j.ws.m.sha256 if j.ws.m else None,
-        "daemon_code_sha256": j.code_sha, "workspace": j.ws.root, "rewrites": j.ws.rewrites,
-        "environment": {"python": sys.version.split()[0], "kernel": os.uname().release,
-                        "machine": os.uname().machine, "strace": bool(_strace()),
-                        "systemd_analyze": bool(shutil.which("systemd-analyze", path=SYSTEM_PATH))},
-        "checks": [{"id": c.id, "title": c.title, "state": c.state, "evidence": c.evidence}
-                   for c in j.checks],
-    }
+    report = judge.report(j)
     report_path = os.path.join(j.ws.root, "battery-report.json")
     with open(report_path, "w") as fh:
         json.dump(report, fh, indent=2)
         fh.write("\n")
-    width = max(len(c.title) for c in j.checks)
-    for c in j.checks:
-        print(f"{c.id}  {c.state:<10} {c.title:<{width}}  {c.evidence}")
-    for note in j.ws.rewrites:
-        print(f"note: battery rewrote {note}")
-    if candidate:
-        for d in candidate["diagnostics"]:
-            print(f"candidate: {d['where']}: {d['message']}")
-    print(f"report: {report_path}")
-    if emit_unit:
-        try:
-            unit_path, record_path = qualify.emit(j, emit_unit, report_path)
-        except qualify.Refused as e:
-            print(f"installable unit: not emitted ({e})")
-        else:
-            print(f"installable unit: {unit_path}")
-            print(f"qualification record: {record_path}")
-            print("note: qualification is not activation; installing and enabling are a person's decision")
-    print(f"RESULT: {j.result}")
-    return judge.exit_code(j.result)
+    return judge.print_report(report, report_path=report_path, as_json=as_json)

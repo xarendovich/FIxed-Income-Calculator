@@ -7,8 +7,9 @@ a candidate daemon comes back inward in a candidate envelope (envelope.py) that 
 contract it targeted. The shape mirrors the Step 9 HandoffEnvelope: exact identity
 (contract_version plus a deterministic contract_sha256) and a required contract, and the
 same rule - observation is not activation: nothing a candidate says about itself is
-evidence. Only validate, precheck and the battery produce evidence, and only the battery's
-PASS plus a human Class C ruling activates anything.
+evidence. Only precheck, validate and the battery produce evidence (one report shape,
+spark-daemon-report/1), and only a qualifying battery report plus a human Class C ruling
+activates anything.
 
 contract_version follows semantic versioning for daemon authors: MAJOR when a daemon that
 satisfied the old contract can fail the new one (a new purity rule, a narrower bound), MINOR
@@ -20,7 +21,7 @@ any enforced value changes, so a stale README can never be mistaken for the runn
 import inspect
 import re
 
-from . import (BATTERY_SCHEMA, DIGEST_NAME, EXIT_ALREADY_RUNNING, EXIT_LEDGER_CORRUPT, EXIT_OK,
+from . import (DIGEST_NAME, EXIT_ALREADY_RUNNING, EXIT_LEDGER_CORRUPT, EXIT_OK,
                EXIT_POLICY, EXIT_UNCERTAIN_COMMIT, EXIT_USAGE, KNOWN_OUTPUT_ENTRIES, LEDGER_NAME,
                LEDGER_SCHEMA, MANIFEST_SCHEMA, RESERVED_EVENT_TYPES, VERSION)
 from . import manifest as mf
@@ -30,13 +31,11 @@ from .canonical import MAX_SAFE_INT, canonical_bytes, sha256_hex
 CONTRACT_SCHEMA = "spark-daemon-contract/1"
 CONTRACT_VERSION = "5.0.0-dev"     # v5 cuts in progress; "5.0.0" and its digest are recorded at the last cut
 CANDIDATE_SCHEMA = "spark-daemon-candidate/1"
-VALIDATE_SCHEMA = "spark-daemon-validate/2"
-PRECHECK_SCHEMA = "spark-daemon-precheck/2"
 MANIFEST_SCHEMA_ID = "urn:spark:schema:spark-daemon-manifest:4"
 
 AUTHORITY = (
     "A candidate carries no authority. Whoever or whatever produced it - a person, a script "
-    "or a model - it cannot certify itself: validate and precheck are fast feedback, the "
+    "or a model - it cannot certify itself: precheck and validate are fast feedback, the "
     "conformance battery's PASS is the only admissible evidence, and activation remains a "
     "human Class C decision. A producer is never granted authority that no one adjudicated."
 )
@@ -230,18 +229,21 @@ def _evidence() -> dict:
         "checks": checks,
         "states": list(judge.STATES),
         "verdict": "FAIL if any check FAILs, INCOMPLETE if any is UNKNOWN, PASS otherwise; exit 0, 3 or 1",
+        "report": {"schema": judge.REPORT_SCHEMA,
+                   "holds": "facts only: inputs, host, and each check's state and evidence",
+                   "derived_on_read": "the verdict and whether the report qualifies (judge.conclusions); "
+                                      "never stored"},
         "profiles": {
-            "validate": {"schema": VALIDATE_SCHEMA, "cost": "milliseconds", "qualifying": False,
-                         "checks": judge.profile_ids("validate")},
-            "precheck": {"schema": PRECHECK_SCHEMA, "cost": "seconds", "qualifying": False,
-                         "checks": judge.profile_ids("precheck")},
-            "battery": {"schema": BATTERY_SCHEMA, "cost": "minutes", "qualifying": "without --quick",
-                        "checks": judge.profile_ids("battery")},
+            "precheck": {"cost": "milliseconds", "checks": judge.profile_ids("precheck")},
+            "validate": {"cost": "seconds", "checks": judge.profile_ids("validate")},
+            "battery": {"cost": "minutes", "checks": judge.profile_ids("battery")},
         },
-        "installable_unit": "only from a qualifying battery PASS (battery --emit-unit): the unit carries the "
-                            "manifest, daemon.py and contract digests, and a qualification record binds its "
-                            "bytes, options, report and host; the runtime refuses any other start outside "
-                            "test mode",
+        "qualifies": "a report from the full battery (not --quick) that holds every battery check, "
+                     "none FAIL or UNKNOWN, and binds a complete unit",
+        "installable_unit": "a projection of a qualifying report (spark-daemon unit --report): the report "
+                            "binds every input of the unit generator. Installing checks that the report "
+                            "qualifies and was made on this host; the runtime checks at every start that "
+                            "the manifest, daemon.py and contract are those the unit names",
         "admissible_for_activation": "a qualifying battery PASS is evidence; activation remains a human "
                                      "Class C decision",
     }

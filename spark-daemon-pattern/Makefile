@@ -5,14 +5,14 @@ REV ?= r3
 SPARK = $(PY) -I -B bin/spark-daemon
 EXAMPLES = $(sort $(dir $(wildcard examples/*/manifest.json)))
 
-.PHONY: help test contract check-contract validate-examples precheck-examples battery-examples evidence clean
+.PHONY: help test contract check-contract precheck-examples validate-examples battery-examples evidence clean
 
 help:
 	@echo "make test               self-tests (about 1 minute)"
 	@echo "make contract           regenerate contract/*.json from the enforced rules"
 	@echo "make check-contract     fail if contract/*.json is stale"
-	@echo "make validate-examples  validate every reference daemon (milliseconds)"
-	@echo "make precheck-examples  precheck every reference daemon (about 1 s each)"
+	@echo "make precheck-examples  static checks on every reference daemon (milliseconds)"
+	@echo "make validate-examples  static checks plus a short confined run (about 1 s each)"
 	@echo "make battery-examples   full battery on every reference daemon (about 15 s each)"
 	@echo "make evidence           battery reports and self-test output into evidence/\$$(REV)/"
 
@@ -28,13 +28,13 @@ check-contract:
 	@$(SPARK) describe | diff -u contract/daemon-contract.json - && \
 	 $(SPARK) schema | diff -u contract/manifest.schema.json - && echo "contract up to date"
 
-validate-examples:
-	@set -e; for d in $(EXAMPLES); do \
-	  $(SPARK) validate --manifest $${d}manifest.json > /dev/null && echo "$$d PASS" || { echo "$$d FAIL"; exit 1; }; done
-
 precheck-examples:
 	@set -e; for d in $(EXAMPLES); do \
-	  $(SPARK) precheck --manifest $${d}manifest.json > /dev/null && echo "$$d OK" || { echo "$$d FAIL"; exit 1; }; done
+	  $(SPARK) precheck --manifest $${d}manifest.json > /dev/null 2>&1 && echo "$$d PASS" || { echo "$$d FAIL"; exit 1; }; done
+
+validate-examples:
+	@set -e; for d in $(EXAMPLES); do \
+	  $(SPARK) validate --manifest $${d}manifest.json > /dev/null 2>&1 && echo "$$d PASS" || { echo "$$d FAIL"; exit 1; }; done
 
 battery-examples:
 	@set -e; for d in $(EXAMPLES); do \

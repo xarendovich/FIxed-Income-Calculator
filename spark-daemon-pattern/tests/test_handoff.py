@@ -1,5 +1,7 @@
 """The handoff layer: the published contract, the manifest JSON Schema, candidate envelopes,
-validate --json, precheck, scaffold and the reference daemons."""
+precheck --json (static), validate (the short run), scaffold and the reference daemons. Since
+contract 5 every profile writes the one report (spark-daemon-report/1), whose verdict is
+derived on read."""
 
 import copy
 import hashlib
@@ -12,7 +14,7 @@ import tempfile
 import unittest
 
 from helpers import ENTRY, FIXTURES, ROOT, Sandbox
-from spark_daemon import SYSTEM_PATH, contract, handoff, manifest, scaffold
+from spark_daemon import SYSTEM_PATH, contract, judge, manifest, scaffold
 
 CONTRACT_DIR = os.path.join(ROOT, "contract")
 EXAMPLES = os.path.join(ROOT, "examples")
@@ -27,6 +29,16 @@ except ImportError:          # optional: CI installs it; the stdlib-only runtime
 def cli(*args, timeout=120):
     return subprocess.run([sys.executable, "-I", "-B", ENTRY, *args], capture_output=True, text=True,
                           timeout=timeout, env={"PATH": SYSTEM_PATH, "HOME": "/nonexistent", "LANG": "C.UTF-8"})
+
+
+def static_report(manifest_path, envelope=None):
+    """The precheck profile's report, with what a reader derives from it: valid (the verdict is
+    PASS) and the diagnostics of every check."""
+    j = judge.run("precheck", manifest_path, envelope=envelope)
+    r = judge.report(j)
+    view = dict(r, valid=judge.conclusions(r)["result"] == "PASS",
+                diagnostics=[d for c in r["checks"] for d in c["diagnostics"]])
+    return view, j.m
 
 
 def load_json(path):
@@ -194,7 +206,7 @@ class EnvelopeTests(unittest.TestCase):
             json.dump(env, fh)
 
     def report(self):
-        return handoff.validate_report(self.manifest, self.envelope)[0]
+        return static_report(self.manifest, self.envelope)[0]
 
     def test_scaffold_envelope_is_exact(self):
         r = self.report()
@@ -239,7 +251,7 @@ class EnvelopeTests(unittest.TestCase):
         r = self.report()
         self.assertTrue(r["valid"], r["diagnostics"])
         self.assertEqual(r["candidate"]["contract_match"], "compatible")
-        self.assertEqual(r["warning_count"], 1)
+        self.assertEqual(sum(d["severity"] == "warning" for d in r["diagnostics"]), 1)
 
     def test_bad_producer_kind(self):
         self.rewrite(lambda e: e["producer"].update(kind="oracle"))
@@ -254,14 +266,16 @@ class EnvelopeTests(unittest.TestCase):
         self.assertEqual(r["candidate"]["producer"]["kind"], "model")
 
 
-class ValidateJsonTests(unittest.TestCase):
+class PrecheckJsonTests(unittest.TestCase):
     def test_structured_diagnostics(self):
-        p = cli("validate", "--json", "--manifest", os.path.join(FIXTURES, "opener", "manifest.json"))
+        p = cli("precheck", "--json", "--manifest", os.path.join(FIXTURES, "opener", "manifest.json"))
         self.assertEqual(p.returncode, 1)
         r = json.loads(p.stdout)
-        self.assertEqual(r["schema"], "spark-daemon-validate/2")
-        self.assertEqual(r["diagnostics"], [{"layer": "purity", "severity": "error", "where": "daemon.py",
-                                             "line": 5, "message": "call to open() is not allowed"}])
+        self.assertEqual(r["schema"], "spark-daemon-report/1")
+        self.assertEqual([d for c in r["checks"] for d in c["diagnostics"]],
+                         [{"layer": "purity", "severity": "error", "where": "daemon.py",
+                           "line": 5, "message": "call to open() is not allowed"}])
+        self.assertIn("since contract 5, precheck is the static checks", p.stderr)
 
     def test_manifest_diagnostics_carry_the_field(self):
         tmp = tempfile.mkdtemp()
@@ -272,7 +286,7 @@ class ValidateJsonTests(unittest.TestCase):
             with open(os.path.join(tmp, "manifest.json"), "w") as fh:
                 json.dump(data, fh)
             shutil.copy(os.path.join(EXAMPLES, "meminfo-watch", "daemon.py"), tmp)
-            r, _ = handoff.validate_report(os.path.join(tmp, "manifest.json"))
+            r, _ = static_report(os.path.join(tmp, "manifest.json"))
             wheres = {d["where"] for d in r["diagnostics"]}
             self.assertEqual(wheres, {"trigger.interval_seconds", "commands"})
             self.assertTrue(all(d["layer"] == "manifest" for d in r["diagnostics"]))
@@ -280,24 +294,26 @@ class ValidateJsonTests(unittest.TestCase):
             shutil.rmtree(tmp)
 
     def test_text_mode_is_unchanged_for_people(self):
-        p = cli("validate", "--manifest", os.path.join(EXAMPLES, "meminfo-watch", "manifest.json"))
+        p = cli("precheck", "--manifest", os.path.join(EXAMPLES, "meminfo-watch", "manifest.json"))
         self.assertEqual(p.returncode, 0)
         self.assertTrue(p.stdout.strip().endswith("RESULT: PASS"))
 
 
-class PrecheckTests(unittest.TestCase):
+class ValidateRunTests(unittest.TestCase):
+    """The validate profile since contract 5 (it was precheck): the static checks plus a short
+    confined run and its ledger."""
+
     def precheck(self, manifest_path, *extra):
-        p = cli("precheck", "--manifest", manifest_path, *extra)
+        p = cli("validate", "--json", "--manifest", manifest_path, *extra)
         return p.returncode, json.loads(p.stdout)
 
-    def test_every_reference_daemon_prechecks_ok(self):
+    def test_every_reference_daemon_validates(self):
         for name in EXAMPLE_NAMES:
             with self.subTest(example=name):
                 code, r = self.precheck(os.path.join(EXAMPLES, name, "manifest.json"))
                 self.assertEqual(code, 0, json.dumps(r["checks"]))
-                self.assertEqual(r["result"], "PASS")
-                self.assertFalse(r["activation_evidence"])
-                self.assertFalse(r["qualifying"])
+                self.assertEqual(judge.conclusions(r)["result"], "PASS")
+                self.assertFalse(judge.conclusions(r)["qualifies"])
 
     def test_impure_daemon_fails_fast_and_skips_the_run(self):
         code, r = self.precheck(os.path.join(FIXTURES, "opener", "manifest.json"))
@@ -311,13 +327,15 @@ class PrecheckTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual({c["id"]: c["state"] for c in r["checks"]}["DB-03"], "FAIL")
 
-    def test_precheck_is_never_qualifying(self):
-        # r4.11 (R-7): precheck says PASS in the one shared vocabulary, but it is feedback,
-        # never qualification. Only the full battery qualifies (and may emit a unit, R-3).
+    def test_validate_is_never_qualifying(self):
+        # r4.11 (R-7): the short run says PASS in the one shared vocabulary, but it is feedback,
+        # never qualification. Only the full battery qualifies (and only its report projects a unit).
         code, r = self.precheck(os.path.join(EXAMPLES, "meminfo-watch", "manifest.json"))
-        self.assertEqual((r["profile"], r["qualifying"], r["activation_evidence"]), ("precheck", False, False))
+        found = judge.conclusions(r)
+        self.assertEqual((r["profile"], found["result"], found["qualifies"]), ("validate", "PASS", False))
+        self.assertIn("the validate profile does not qualify", found["why_not"][0])
 
-    def test_an_absolute_output_dir_prechecks_like_the_battery(self):
+    def test_an_absolute_output_dir_validates_like_the_battery(self):
         # r4.7 (HF-37): the battery and precheck both rewrite an absolute output_dir into their
         # workspace, but precheck bound the original manifest: "no ledger", and the rewritten
         # folder reported as a write outside the output directory. The battery passed it.
@@ -354,7 +372,7 @@ class ScaffoldTests(unittest.TestCase):
             for unit in ("system", "user"):
                 d = os.path.join(tmp, unit)
                 scaffold.scaffold(d, name="a-very-long-scaffolded-daemon-name-x", unit=unit)
-                r, m = handoff.validate_report(os.path.join(d, "manifest.json"), os.path.join(d, "candidate.json"))
+                r, m = static_report(os.path.join(d, "manifest.json"), os.path.join(d, "candidate.json"))
                 self.assertTrue(r["valid"], r["diagnostics"])
                 if unit == "system":
                     self.assertLessEqual(len(m.run_as.user), 32)

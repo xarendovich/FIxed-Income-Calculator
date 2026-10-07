@@ -62,7 +62,7 @@ class VendorTests(unittest.TestCase):
         with open(path, "rb") as fh:
             data = fh.read()
         with open(path, "wb") as fh:
-            fh.write(data.replace(b"PRECHECK_CYCLES = 2", b"PRECHECK_CYCLES = 3", 1))
+            fh.write(data.replace(b"SHORT_RUN_CYCLES = 2 ", b"SHORT_RUN_CYCLES = 3 ", 1))
         after, _, _ = self.v.binding(src, MAP)
         self.assertNotEqual(before["source_tree_sha256"], after["source_tree_sha256"])
         self.assertNotEqual(before["transformed_tree_sha256"], after["transformed_tree_sha256"])
