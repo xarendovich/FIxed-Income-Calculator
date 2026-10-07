@@ -64,7 +64,7 @@ No predicate appears in both columns, and none of the r4.11 gates is lost. Three
 | `5a6fdb5`, Python 3.12.3 | 261 run, OK, 4 skipped (`jsonschema` absent); those 4 pass separately with `jsonschema` | dir-watch, disk-watch, meminfo-watch: PASS, 21 PASS + DB-24 N/A |
 | `5a6fdb5`, Python 3.13.12 | 261 run, OK, 4 skipped (same 4) | the same three PASS |
 | The fixes, Python 3.11.15 and 3.12.3 with `jsonschema` | **264 of 264, none skipped** (261 + the 3 new tests in `tests-verification.txt`); `fixed-selftests-*.txt` | the same three PASS on 3.12.3 (`fixed-battery-*.txt`); `make check-contract` up to date |
-| The fixes, from a clean checkout | `evidence/v5/verification/clean-*` | the same |
+| The fixes, from a clean checkout (3f67f51), Python 3.12.3, long workspace paths | **264 of 264, none skipped** (`clean-selftests-python3.12.txt`) | three batteries PASS (`clean-battery-*`); contract up to date; clone clean (`clean-summary.txt`) |
 
 The DGX run is still the one piece no container can stand in for: aarch64, its kernel's Landlock ABI, and systemd as PID 1 (G-6).
 

@@ -1,0 +1,5 @@
+Clean clone of 3f67f51, Python 3.12.3 with jsonschema, Landlock ABI 7, long workspace paths:
+  264 of 264 tests, OK, none skipped
+  dir-watch, disk-watch, meminfo-watch: PASS (21 PASS + DB-24 N/A)
+  make check-contract: up to date (5.0.0, 2d080b40...)
+  clone remained clean (0 dirty files)
