@@ -44,8 +44,7 @@ class Sandbox:
 
     def env(self, **extra):
         env = {"HOME": self.home, "SPARK_DAEMON_HOME": self.home, "PATH": SYSTEM_PATH,
-               "LANG": "C.UTF-8", "SPARK_DAEMON_TEST": "1", "SPARK_DAEMON_TEST_INTERVAL_MS": "100",
-               "PYTHONDONTWRITEBYTECODE": "1"}
+               "LANG": "C.UTF-8", "PYTHONDONTWRITEBYTECODE": "1"}
         env.update(extra)
         return env
 
@@ -56,18 +55,31 @@ class Sandbox:
             fh.write(text)
 
     def qualified_args(self):
-        """What a qualified unit's ExecStart adds (r4.11, R-3): the digests of the files as they
-        are, so a run outside test mode is accepted by the runtime's qualification gate."""
+        """What a qualified unit's ExecStart adds: the digests of the files as they are, so the
+        runtime's gate accepts the start."""
         from spark_daemon import qualify
         return qualify.expect_args(qualify.expected_identity(self.manifest))
 
-    def run(self, cycles=3, timeout=30, qualified=False, **env):
-        args = [sys.executable, "-I", "-B", ENTRY, "run", "--manifest", self.manifest]
-        if cycles is not None:
-            args += ["--max-cycles", str(cycles)]
+    def argv(self, cycles=3, *, production=False, qualified=True, **params):
+        """The command line of one start. By default the harness entry (contract 5: explicit,
+        recorded parameters; interval_ms defaults to 100) with the files' digests. production
+        uses `run`, which takes no harness parameter at all."""
+        args = [sys.executable, "-I", "-B", ENTRY, "run" if production else "harness", "--manifest", self.manifest]
         if qualified:
             args += self.qualified_args()
-        return subprocess.run(args, env=self.env(**env), capture_output=True, text=True, timeout=timeout)
+        if not production:
+            params.setdefault("interval_ms", 100)
+            for key, value in params.items():
+                args += [f"--{key.replace('_', '-')}", str(value)]
+        elif params:
+            raise TypeError(f"run takes no harness parameter: {sorted(params)}")
+        if cycles is not None:
+            args += ["--max-cycles", str(cycles)]
+        return args
+
+    def run(self, cycles=3, timeout=30, production=False, qualified=True, env=None, **params):
+        return subprocess.run(self.argv(cycles, production=production, qualified=qualified, **params),
+                              env=self.env(**(env or {})), capture_output=True, text=True, timeout=timeout)
 
     def cli(self, *args, timeout=60, **env):
         return subprocess.run([sys.executable, "-I", "-B", ENTRY, *args], env=self.env(**env),

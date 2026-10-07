@@ -176,9 +176,8 @@ class InterpreterMutationTests(unittest.TestCase):
         try:
             sb.write("data/mode.txt", "busy")
             for _ in range(5):
-                p = subprocess.Popen([sys.executable, "-I", "-B", entry, "run", "--manifest", sb.manifest],
-                                     env=sb.env(SPARK_DAEMON_TEST_BLIND_LIMIT_MS="1500"),
-                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                p = subprocess.Popen([sys.executable, "-I", "-B", entry, *sb.argv(None, blind_limit_ms=1500)[4:]],
+                                     env=sb.env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 try:
                     return p.wait(timeout=1.0)
                 except subprocess.TimeoutExpired:

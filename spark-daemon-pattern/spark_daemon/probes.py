@@ -47,18 +47,20 @@ HOSTILE = (
 )
 
 
-def _setup(manifest_path):
+def _setup(manifest_path, output_dir=None):
     m = manifest_mod.load(manifest_path)
-    policy = guard.Policy(m)
+    if output_dir is not None:      # the harness's override, under the same placement rules
+        manifest_mod.parse({**manifest_mod.to_dict(manifest_path), "output_dir": output_dir}, manifest_path)
+    policy = guard.Policy(m, output_dir=output_dir)
     guard.prepare_output_dir(policy.output_dir)
     return m, policy
 
 
-def probe_policy(manifest_path: str, canary: str) -> int:
+def probe_policy(manifest_path: str, canary: str, output_dir: str | None = None) -> int:
     os.umask(0o077)
     sys.dont_write_bytecode = True
     try:
-        m, policy = _setup(manifest_path)
+        m, policy = _setup(manifest_path, output_dir)
     except (manifest_mod.ManifestError, guard.GuardError) as e:
         print(json.dumps({"error": str(e)[:200]}))
         return EXIT_USAGE
@@ -126,28 +128,31 @@ def probe_policy(manifest_path: str, canary: str) -> int:
     return EXIT_OK if ok else EXIT_FAILED
 
 
-def probe_landlock(manifest_path: str, canary: str) -> int:
+def probe_landlock(manifest_path: str, canary: str, output_dir: str | None = None) -> int:
     """DB-17: the audit hook runs in record mode only here - it counts violations but never
     raises. Whatever still gets blocked was blocked by the kernel (Landlock), not by
-    guard.py's Python-level checks. Below MIN_USABLE_ABI, this probe is N/A rather than a
-    failure, matching runtime.py's own PD-15 test-mode behaviour."""
+    guard.py's Python-level checks. Below MIN_USABLE_ABI this probe is N/A: there is no kernel
+    layer to isolate (and since contract 5 the daemon itself refuses to start there, PD-15)."""
     os.umask(0o077)
     sys.dont_write_bytecode = True
     try:
-        m, policy = _setup(manifest_path)
+        m, policy = _setup(manifest_path, output_dir)
     except (manifest_mod.ManifestError, guard.GuardError) as e:
         print(json.dumps({"error": str(e)[:200]}))
         return EXIT_USAGE
     daemon_dir = os.path.dirname(m.code_path)
     try:
-        info = landlock.apply_supervisor_domain(
-            policy, extra_read_paths=landlock.system_read_paths() + (daemon_dir,), test_mode=True)
-    except landlock.LandlockError as e:  # pragma: no cover - test_mode=True never raises
-        print(json.dumps({"status": "N/A", "reason": str(e)[:200]}))
+        abi = landlock.abi_version()
+    except OSError:
+        abi = -1
+    if abi < landlock.MIN_USABLE_ABI:
+        print(json.dumps({"status": "N/A", "reason": f"Landlock ABI below {landlock.MIN_USABLE_ABI}"}))
         return EXIT_OK
-    if info["status"] == "unavailable":
-        print(json.dumps({"status": "N/A", "reason": f"Landlock ABI below {landlock.MIN_USABLE_ABI}",
-                          "landlock": info}))
+    try:
+        info = landlock.apply_supervisor_domain(
+            policy, extra_read_paths=landlock.system_read_paths() + (daemon_dir,))
+    except landlock.LandlockError as e:
+        print(json.dumps({"status": "FAIL", "reason": str(e)[:200]}))
         return EXIT_OK
     guard.install_audit_hook(policy, "record")  # counts, never blocks: isolates Landlock's effect
     home = os.environ.get("SPARK_DAEMON_HOME") or os.path.expanduser("~")
@@ -214,11 +219,11 @@ def _random_text(rng: random.Random) -> str:
     return "".join(chars)
 
 
-def probe_digest(manifest_path: str, seed: int) -> int:
+def probe_digest(manifest_path: str, seed: int, output_dir: str | None = None) -> int:
     os.umask(0o077)
     sys.dont_write_bytecode = True
     try:
-        m, policy = _setup(manifest_path)
+        m, policy = _setup(manifest_path, output_dir)
     except (manifest_mod.ManifestError, guard.GuardError) as e:
         print(json.dumps({"error": str(e)[:200]}))
         return EXIT_USAGE

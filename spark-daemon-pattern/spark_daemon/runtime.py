@@ -6,11 +6,11 @@ Order at start (each step must succeed before the next):
  3. prepare the output directory (0700, owned, no symlink) -> exit 78 if unsafe
  4. take the single-instance lock                         -> exit 73 if already running
  5. static purity check of daemon.py                      -> exit 2 on problems
-    then the qualification gate (r4.11): the digests a qualified unit carries must match;
-    outside test mode a start without them is refused       -> exit 78
- 6. apply the Landlock domain (r2, AP-01)                 -> exit 78 outside test mode if
-    unavailable or too old (PD-15); before the audit hook, because the hook blocks ctypes,
-    which this step still needs
+    then the qualification gate: the digests the unit carries must match the manifest,
+    daemon.py and contract; a start without them is refused  -> exit 78
+ 6. apply the Landlock domain (r2, AP-01)                 -> exit 78 if unavailable or too
+    old (PD-15); before the audit hook, because the hook blocks ctypes, which this step
+    still needs
  7. install the audit hook, then import daemon.py
  8. recover the ledger: verify, quarantine a torn tail     -> exit 65 if corrupt (nothing changed)
  9. inventory the output directory for foreign files
@@ -59,7 +59,14 @@ layer next to purity.py, the audit hook and the systemd unit; see that module's 
 for what it does and does not cover, in particular the gap it cannot close on its own (a
 denied path nested inside a granted read). The poll sleep carries a small random jitter, so
 many daemons started together do not wake in lockstep and spike the shared memory bus
-(disabled in test mode, for deterministic timing). gc.collect() runs once per cycle, after
+(off under the harness, for deterministic timing).
+
+No test mode (contract 5, E-6/E-12). run() reads no test switch from the environment: a
+production start always needs the three digests and Landlock. The battery and the self-tests
+use a separate entry, `spark-daemon harness`, which passes a Harness: explicit parameters
+(interval, blind limit, cycle budget, an output directory for a manifest whose output_dir is
+absolute, and record-only audit for DB-03 and DB-17), recorded in DAEMON_START. The harness
+needs the digests and Landlock too, and refuses to run inside a systemd service. gc.collect() runs once per cycle, after
 committing, to reclaim reference cycles (chiefly exception tracebacks from the error path,
 plus anything a daemon's own decide() builds) and give the allocator a chance to return
 freed arenas to the OS between cycles. Plain string and dict garbage is already freed by
@@ -90,7 +97,7 @@ FOREIGN_NAMES_MAX = 20
 FOREIGN_NAME_CHARS = 128
 RECENT_RECORDS = 20
 # Thundering-herd defense (r2): +/- this fraction of the interval, capped in absolute
-# seconds so a long interval (up to 86400s) does not drift by hours. Disabled in test mode.
+# seconds so a long interval (up to 86400s) does not drift by hours. Off under the harness.
 JITTER_FRACTION = 0.05
 JITTER_MAX_SECONDS = 30.0
 
@@ -100,10 +107,40 @@ def log(message: str) -> None:
     os.write(2, (f"spark-daemon: {message}"[:500] + "\n").encode("utf-8", "replace"))
 
 
-def _jitter_bound(interval_seconds: float, test_mode: bool) -> float:
-    """The one-sided jitter bound in seconds: 0 in test mode, otherwise a fixed fraction of
+class Harness:
+    """The explicit parameters of a harness run (contract 5, E-12). Each is recorded in
+    DAEMON_START; a production run has none. Bounds as the 4.x test overrides had."""
+
+    BOUNDS = {"interval_ms": (50, 60000), "blind_limit_ms": (100, 3600000), "cycle_budget_ms": (100, 1800000)}
+
+    def __init__(self, *, interval_ms=None, blind_limit_ms=None, cycle_budget_ms=None, output_dir=None,
+                 audit="enforce"):
+        self.values = {}
+        for key, value in (("interval_ms", interval_ms), ("blind_limit_ms", blind_limit_ms),
+                           ("cycle_budget_ms", cycle_budget_ms)):
+            if value is None:
+                continue
+            low, high = self.BOUNDS[key]
+            if not (isinstance(value, int) and not isinstance(value, bool) and low <= value <= high):
+                raise ValueError(f"{key} must be an integer from {low} to {high}")
+            self.values[key] = value
+        if output_dir is not None:
+            if not (isinstance(output_dir, str) and os.path.isabs(output_dir)):
+                raise ValueError("output_dir must be an absolute path")
+            self.values["output_dir"] = os.path.normpath(output_dir)
+        if audit not in ("enforce", "record"):
+            raise ValueError("audit must be enforce or record")
+        if audit == "record":
+            self.values["audit_mode"] = "record"
+
+    def record(self) -> dict:
+        return {**self.values, "jitter": "off"}
+
+
+def _jitter_bound(interval_seconds: float, harness: bool) -> float:
+    """The one-sided jitter bound in seconds: 0 under the harness, otherwise a fixed fraction of
     the interval capped at JITTER_MAX_SECONDS so a long interval does not drift by hours."""
-    if test_mode:
+    if harness:
         return 0.0
     return min(JITTER_MAX_SECONDS, interval_seconds * JITTER_FRACTION)
 
@@ -154,15 +191,14 @@ class _Stop:
         self.reason = f"signal {signal.Signals(signum).name}"
 
 
-def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None = None) -> int:
+def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None = None,
+        harness: Harness | None = None) -> int:
     os.umask(0o077)
     sys.dont_write_bytecode = True
 
-    test_mode = os.environ.get("SPARK_DAEMON_TEST") == "1"
-    if test_mode and os.environ.get("INVOCATION_ID"):
-        log("test mode is refused inside a systemd service")
+    if harness is not None and os.environ.get("INVOCATION_ID"):
+        log("the harness is refused inside a systemd service")
         return EXIT_USAGE
-    overrides = {}
     try:
         m = manifest_mod.load(manifest_path)
     except manifest_mod.ManifestError as e:
@@ -170,32 +206,25 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
             log(f"manifest: {problem}")
         return EXIT_USAGE
 
-    interval = float(m.trigger.interval_seconds)
-    blind_limit = float(m.blind_limit_seconds)
-    cycle_budget = float(m.cycle_budget_seconds)
-    audit_mode = "enforce"
-    if test_mode:
-        ms = os.environ.get("SPARK_DAEMON_TEST_INTERVAL_MS")
-        if ms and ms.isdigit() and 50 <= int(ms) <= 60000:
-            interval = int(ms) / 1000
-            overrides["interval_ms"] = int(ms)
-        ms = os.environ.get("SPARK_DAEMON_TEST_BLIND_LIMIT_MS")
-        if ms and ms.isdigit() and 100 <= int(ms) <= 3600000:
-            blind_limit = int(ms) / 1000
-            overrides["blind_limit_ms"] = int(ms)
-        ms = os.environ.get("SPARK_DAEMON_TEST_CYCLE_BUDGET_MS")
-        if ms and ms.isdigit() and 100 <= int(ms) <= 1800000:
-            cycle_budget = int(ms) / 1000
-            overrides["cycle_budget_ms"] = int(ms)
-        if os.environ.get("SPARK_DAEMON_AUDIT") == "record":
-            audit_mode = "record"
-            overrides["audit_mode"] = "record"
-    # Jitter is off in test mode so cycle timing stays exact for assertions; it is a fixed
-    # function of the interval, not an opt-in knob, so it is recorded outside test_overrides.
-    jitter_bound = _jitter_bound(interval, test_mode)
+    given = harness.values if harness is not None else {}
+    interval = given.get("interval_ms", m.trigger.interval_seconds * 1000) / 1000
+    blind_limit = given.get("blind_limit_ms", m.blind_limit_seconds * 1000) / 1000
+    cycle_budget = given.get("cycle_budget_ms", m.cycle_budget_seconds * 1000) / 1000
+    audit_mode = given.get("audit_mode", "enforce")
+    output_dir = given.get("output_dir")
+    if output_dir is not None:
+        # The harness may move an absolute output_dir (the battery cannot write to /srv/...), but
+        # only to a place the manifest's own placement rules would accept.
+        try:
+            manifest_mod.parse({**manifest_mod.to_dict(manifest_path), "output_dir": output_dir}, manifest_path)
+        except manifest_mod.ManifestError as e:
+            log(f"harness output_dir refused: {'; '.join(e.problems)}")
+            return EXIT_USAGE
+    # Jitter is off under the harness so cycle timing stays exact for assertions.
+    jitter_bound = _jitter_bound(interval, harness is not None)
     jitter_rng = random.Random(os.urandom(16))
 
-    policy = guard.Policy(m)
+    policy = guard.Policy(m, output_dir=output_dir)
     out = policy.output_dir
     try:
         guard.prepare_output_dir(out)
@@ -218,34 +247,31 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
         return EXIT_USAGE
     with open(m.code_path, "rb") as fh:
         code_sha = sha256_hex(fh.read())
-    # r4.11 (R-3): a daemon runs for real only from a qualified unit, whose ExecStart carries the
-    # digests a qualifying battery PASS bound. Code or a manifest changed since then never starts,
-    # and a preview unit (no digests) is refused outside test mode. Both need a person: 78.
-    if expect is not None:
-        from .contract import contract_identity
-        actual = {"manifest_sha256": m.sha256, "daemon_code_sha256": code_sha,
-                  "contract_sha256": contract_identity()["contract_sha256"]}
-        changed = [key for key in actual if actual[key] != expect.get(key)]
-        if changed:
-            log(f"not the qualified daemon: {', '.join(changed)} differ from its battery PASS; "
-                "refusing to start (qualify it again with battery --emit-unit)")
-            return EXIT_POLICY
-    elif not test_mode:
+    # The runtime's gate (contract 5, E-11): a daemon starts only with the digests its unit carries,
+    # and only if the manifest, daemon.py and contract still have them. Code or a manifest changed
+    # since the battery never starts, and a preview unit (no digests) never starts. Both: 78.
+    if expect is None:
         log("not qualified: started without the digests of a battery PASS (a preview unit, or by "
-            "hand); refusing to start. An installable unit comes from battery --emit-unit")
+            "hand); refusing to start. An installable unit comes from `unit --report`")
+        return EXIT_POLICY
+    from .contract import contract_identity
+    actual = {"manifest_sha256": m.sha256, "daemon_code_sha256": code_sha,
+              "contract_sha256": contract_identity()["contract_sha256"]}
+    changed = [key for key in actual if actual[key] != expect.get(key)]
+    if changed:
+        log(f"not the qualified daemon: {', '.join(changed)} differ from its battery PASS; "
+            "refusing to start (run the battery again and project the unit from its report)")
         return EXIT_POLICY
 
     guard.remove_stray_temp_files(out)
     tool_versions = _tool_versions()
     # Landlock (r2, AP-01) before the audit hook: the hook's own blocked events include
-    # ctypes, which this step still needs. A kernel too old or without Landlock is a
-    # start-up refusal outside test mode (PD-15), so the self-tests and the battery still
-    # run on whatever the developer or CI kernel offers.
+    # ctypes, which this step still needs. A kernel too old or without Landlock is a start-up
+    # refusal (PD-15), under the harness too since contract 5.
     daemon_dir = os.path.dirname(m.code_path)
     try:
         landlock_info = landlock.apply_supervisor_domain(
-            policy, extra_read_paths=landlock.system_read_paths() + (daemon_dir,),
-            test_mode=test_mode)
+            policy, extra_read_paths=landlock.system_read_paths() + (daemon_dir,))
     except landlock.LandlockError as e:
         log(f"Landlock refused: {e}")
         return EXIT_POLICY
@@ -291,7 +317,7 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
         start_boottime_ms = _boottime_ms()
         recent.append(writer.append("DAEMON_START", {
             "skeleton_version": VERSION,
-            "qualified": expect is not None,
+            "qualified": True,
             "manifest_sha256": m.sha256,
             "daemon_code_sha256": code_sha,
             "tools": tool_versions,
@@ -306,7 +332,7 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
             "boot_id": boot_id,
             "boottime_ms": start_boottime_ms,
             "blind_since_boottime_ms": start_boottime_ms - int(inherited * 1000),
-            "test_overrides": overrides,
+            "harness": harness.record() if harness is not None else None,
         }))
         if quarantine:
             recent.append(writer.append("LEDGER_TAIL_QUARANTINED", {

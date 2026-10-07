@@ -326,11 +326,11 @@ def run(profile, manifest_path, **options) -> Judgement:
             from . import battery
             problem = None
             try:
-                j.ws = battery.Workspace(j.manifest_path, j.workdir)
-                # HF-37: run checks bind the workspace's copy (an absolute output_dir is
-                # rewritten into the workspace); reports bind the manifest as written.
-                j.ws.bind_manifest(manifest_mod.load(j.ws.manifest))
-            except (manifest_mod.ManifestError, OSError) as e:
+                # Contract 5 (E-3): the run checks use the manifest and code as written, in place;
+                # nothing is copied or rewritten (HF-37, HF-39 were two judges of two copies).
+                j.ws = battery.Workspace(j.manifest_path, j.workdir, expected_digests(j))
+                j.ws.bind_manifest(j.m)
+            except OSError as e:
                 problem = f"the workspace could not be prepared: {e}"
             for s in runs:
                 if problem:
@@ -380,10 +380,10 @@ def report(j) -> dict:
                         "machine": os.uname().machine,
                         "strace": bool(shutil.which("strace", path=SYSTEM_PATH)),
                         "systemd_analyze": bool(shutil.which("systemd-analyze", path=SYSTEM_PATH))},
-        # Until contract 5's third cut the run checks use a workspace copy of the manifest.
         "workspace": ws.root if ws is not None else None,
-        "workspace_manifest_sha256": ws.m.sha256 if ws is not None and ws.m else None,
-        "rewrites": list(ws.rewrites) if ws is not None else [],
+        # The harness parameters every run check shared (DB-03 adds record-only audit, DB-20 a
+        # short blind limit; each run's DAEMON_START records its own).
+        "harness": dict(ws.harness) if ws is not None else None,
         "checks": [{"id": c.id, "title": c.title, "state": c.state, "evidence": c.evidence,
                     "diagnostics": c.diagnostics} for c in j.checks],
         "authority": AUTHORITY_NOTE,
@@ -455,8 +455,8 @@ def print_report(rep, *, report_path=None, as_json=False) -> int:
             where = d["where"] + (f":{d['line']}" if d["line"] else "")
             prefix = "" if d["severity"] == "error" else "warning: "
             print(f"{d['layer']}: {prefix}{where}: {d['message']}" if where else f"{d['layer']}: {d['message']}")
-    for note in rep.get("rewrites") or []:
-        print(f"note: battery rewrote {note}")
+    if (rep.get("harness") or {}).get("output_dir"):
+        print(f"note: the manifest's output_dir is absolute; the run checks wrote to {rep['harness']['output_dir']}")
     if rep.get("manifest_sha256"):
         print(f"manifest sha256 {rep['manifest_sha256']}")
     if rep.get("candidate"):

@@ -3,6 +3,7 @@
 Authoring and handoff: describe | schema | scaffold | envelope
 Evidence: precheck (static) | validate (+ a short confined run) | battery (qualifies), one report shape
 Operation: unit (--report: the installable unit; --manifest: a preview) | run | verify | status
+Harness (the battery and the self-tests): harness, with explicit, recorded parameters
 Internal (the battery's child processes): probe-policy | probe-landlock | probe-digest
 """
 
@@ -51,7 +52,7 @@ def main(argv=None) -> int:
     source = p.add_mutually_exclusive_group(required=True)
     source.add_argument("--report", help="a battery report: the unit is reproduced from it alone, if it qualifies "
                                          "and was made on this host")
-    source.add_argument("--manifest", help="a PREVIEW, which the runtime refuses to start outside test mode")
+    source.add_argument("--manifest", help="a PREVIEW: it carries no digests, so the runtime refuses to start it")
     p.add_argument("--out", default=None, metavar="DIR", help="with --report: write DIR/<unit name> instead of printing")
     p.add_argument("--python", default="/usr/bin/python3")
     p.add_argument("--plan", action="store_true", help="with --manifest: print the install plan instead of the unit")
@@ -60,16 +61,26 @@ def main(argv=None) -> int:
     p.add_argument("--part-of", default=None,
                    help="start and stop with this unit (PartOf=, After=, WantedBy=)")
 
-    p = sub.add_parser("run", help="run the daemon in the foreground (systemd calls this)")
-    p.add_argument("--manifest", required=True)
-    p.add_argument("--max-cycles", type=int, default=None)
     from .qualify import EXPECT_KEYS
-    for key in EXPECT_KEYS:
-        p.add_argument(f"--expect-{key.replace('_', '-')}", dest=f"expect_{key}", default=None,
-                       help="set by a qualified unit (r4.11): refuse to start unless this digest matches")
+    for name, text in (("run", "run the daemon in the foreground (systemd calls this)"),
+                       ("harness", "run the daemon under the test harness, with explicit, recorded parameters "
+                                   "(the battery and the self-tests; refused inside a systemd service)")):
+        p = sub.add_parser(name, help=text)
+        p.add_argument("--manifest", required=True)
+        p.add_argument("--max-cycles", type=int, default=None)
+        for key in EXPECT_KEYS:
+            p.add_argument(f"--expect-{key.replace('_', '-')}", dest=f"expect_{key}", default=None,
+                           help="refuse to start unless this digest matches (a qualified unit carries all three)")
+    p.add_argument("--interval-ms", type=int, default=None)
+    p.add_argument("--blind-limit-ms", type=int, default=None)
+    p.add_argument("--cycle-budget-ms", type=int, default=None)
+    p.add_argument("--output-dir", default=None, help="for a manifest whose output_dir is absolute")
+    p.add_argument("--audit", choices=("enforce", "record"), default="enforce",
+                   help="record: the audit hook counts but never blocks (DB-03, DB-17)")
 
     p = sub.add_parser("verify", help="verify a daemon's ledger read-only and print its chain head")
     p.add_argument("--manifest", required=True)
+    p.add_argument("--output-dir", default=None, help=argparse.SUPPRESS)    # the battery's harness override
 
     p = sub.add_parser("status", help="a daemon's state from its ledger, verified independently (r4.11)")
     p.add_argument("--manifest", required=True)
@@ -91,14 +102,17 @@ def main(argv=None) -> int:
     p = sub.add_parser("probe-policy", help=argparse.SUPPRESS)
     p.add_argument("--manifest", required=True)
     p.add_argument("--canary", required=True)
+    p.add_argument("--output-dir", default=None)
 
     p = sub.add_parser("probe-landlock", help=argparse.SUPPRESS)
     p.add_argument("--manifest", required=True)
     p.add_argument("--canary", required=True)
+    p.add_argument("--output-dir", default=None)
 
     p = sub.add_parser("probe-digest", help=argparse.SUPPRESS)
     p.add_argument("--manifest", required=True)
     p.add_argument("--seed", type=int, required=True)
+    p.add_argument("--output-dir", default=None)
 
     args = parser.parse_args(argv)
 
@@ -175,15 +189,24 @@ def main(argv=None) -> int:
             return EXIT_USAGE
         return EXIT_OK
 
-    if args.command == "run":
+    if args.command in ("run", "harness"):
         from . import runtime
         from .qualify import EXPECT_KEYS
         given = {key: getattr(args, f"expect_{key}") for key in EXPECT_KEYS}
         if any(given.values()) and not all(given.values()):
             print("the three --expect-*-sha256 options go together", file=sys.stderr)
             return EXIT_USAGE
+        harness = None
+        if args.command == "harness":
+            try:
+                harness = runtime.Harness(interval_ms=args.interval_ms, blind_limit_ms=args.blind_limit_ms,
+                                          cycle_budget_ms=args.cycle_budget_ms, output_dir=args.output_dir,
+                                          audit=args.audit)
+            except ValueError as e:
+                print(f"harness: {e}", file=sys.stderr)
+                return EXIT_USAGE
         return runtime.run(args.manifest, max_cycles=args.max_cycles,
-                           expect=given if all(given.values()) else None)
+                           expect=given if all(given.values()) else None, harness=harness)
 
     if args.command == "status":
         from . import EXIT_FLAGGED, status
@@ -219,7 +242,7 @@ def main(argv=None) -> int:
                 print(f"manifest: {problem}")
             print("RESULT: FAIL")
             return EXIT_FAILED
-        path = os.path.join(expand(m.output_dir), LEDGER_NAME)
+        path = os.path.join(expand(args.output_dir or m.output_dir), LEDGER_NAME)
         try:
             result = ledger.verify_file(path, m.name, m.ledger.record_max_bytes)
         except FileNotFoundError:
@@ -244,15 +267,15 @@ def main(argv=None) -> int:
 
     if args.command == "probe-policy":
         from . import probes
-        return probes.probe_policy(args.manifest, args.canary)
+        return probes.probe_policy(args.manifest, args.canary, args.output_dir)
 
     if args.command == "probe-landlock":
         from . import probes
-        return probes.probe_landlock(args.manifest, args.canary)
+        return probes.probe_landlock(args.manifest, args.canary, args.output_dir)
 
     if args.command == "probe-digest":
         from . import probes
-        return probes.probe_digest(args.manifest, args.seed)
+        return probes.probe_digest(args.manifest, args.seed, args.output_dir)
     return EXIT_USAGE
 
 

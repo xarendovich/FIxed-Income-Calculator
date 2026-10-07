@@ -3,13 +3,11 @@
 import json
 import os
 import socket
-import subprocess
-import sys
 import threading
 import time
 import unittest
 
-from helpers import EXAMPLE, ROOT, Sandbox
+from helpers import EXAMPLE, Sandbox
 from spark_daemon import EXIT_LEDGER_CORRUPT, EXIT_OK, EXIT_POLICY, EXIT_USAGE
 from spark_daemon.runtime import JITTER_FRACTION, JITTER_MAX_SECONDS, _jitter_bound
 
@@ -38,7 +36,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.types(b), ["DAEMON_START", "VALUE_OBSERVED", "DAEMON_STOP"])
         start = b.records()[0]["payload"]
         self.assertIsNone(start["previous_run_ended_cleanly"])
-        self.assertEqual(start["test_overrides"], {"interval_ms": 100})
+        self.assertEqual(start["harness"], {"interval_ms": 100, "jitter": "off"})
         b.write("data/value.txt", "second")
         p = b.run(cycles=2)
         recs = b.records()
@@ -115,10 +113,25 @@ class RuntimeTests(unittest.TestCase):
         errors = [r["payload"] for r in b.records() if r["event_type"] == "DAEMON_ERROR"]
         self.assertEqual(errors[0]["category"], "EVENT_INVALID")
 
-    def test_test_mode_refused_under_systemd(self):
+    def test_the_harness_is_refused_under_systemd(self):
         b = self.box("counter")
-        p = b.run(cycles=1, INVOCATION_ID="0123456789abcdef")
+        p = b.run(cycles=1, env={"INVOCATION_ID": "0123456789abcdef"})
         self.assertEqual(p.returncode, EXIT_USAGE)
+        self.assertFalse(os.path.exists(b.ledger_path))
+
+    def test_the_harness_output_dir_follows_the_manifests_rules(self):
+        # Contract 5 (E-3): the one way the battery moves an absolute output_dir. It may only go
+        # where the manifest's own placement rules would accept it.
+        b = self.box("counter")
+        b.write("data/value.txt", "x")
+        for bad in (os.path.join(b.home, ".ssh", "out"), os.path.join(b.home, "data", "out"), "relative/out"):
+            with self.subTest(output_dir=bad):
+                p = b.run(cycles=1, output_dir=bad)
+                self.assertEqual(p.returncode, EXIT_USAGE, p.stderr)
+        good = os.path.join(b.home, "elsewhere")
+        p = b.run(cycles=1, output_dir=good)
+        self.assertEqual(p.returncode, EXIT_OK, p.stderr)
+        self.assertTrue(os.path.exists(os.path.join(good, "ledger.jsonl")))
         self.assertFalse(os.path.exists(b.ledger_path))
 
     def test_impure_code_never_starts(self):
@@ -177,7 +190,7 @@ class RuntimeTests(unittest.TestCase):
         t = threading.Thread(target=collect)
         t.start()
         # The cycle's alarm ends each 3-second hang (contract 5: the block is a read, not a program).
-        p = b.run(cycles=2, NOTIFY_SOCKET=sock_path, SPARK_DAEMON_TEST_CYCLE_BUDGET_MS="3000")
+        p = b.run(cycles=2, env={"NOTIFY_SOCKET": sock_path}, cycle_budget_ms=3000)
         done.set()
         t.join()
         sock.close()
@@ -189,33 +202,28 @@ class RuntimeTests(unittest.TestCase):
         self.assertGreater(longest, 2.5, "pings continued during a 3-second hang")
         self.assertIn("STOPPING=1", kinds)
 
-    def test_jitter_bound_is_zero_in_test_mode(self):
+    def test_jitter_bound_is_zero_under_the_harness(self):
         for interval in (5.0, 30.0, 86400.0):
-            self.assertEqual(_jitter_bound(interval, test_mode=True), 0.0)
+            self.assertEqual(_jitter_bound(interval, harness=True), 0.0)
 
     def test_jitter_bound_is_a_fraction_of_the_interval(self):
-        self.assertAlmostEqual(_jitter_bound(200.0, test_mode=False), 200.0 * JITTER_FRACTION)
-        self.assertAlmostEqual(_jitter_bound(5.0, test_mode=False), 0.25)
+        self.assertAlmostEqual(_jitter_bound(200.0, harness=False), 200.0 * JITTER_FRACTION)
+        self.assertAlmostEqual(_jitter_bound(5.0, harness=False), 0.25)
 
     def test_jitter_bound_is_capped_for_long_intervals(self):
         # 86400s (the manifest maximum) times 5% would be 4320s; it must not drift by hours.
-        self.assertEqual(_jitter_bound(86400.0, test_mode=False), JITTER_MAX_SECONDS)
+        self.assertEqual(_jitter_bound(86400.0, harness=False), JITTER_MAX_SECONDS)
 
-    def test_jitter_disabled_in_test_mode_and_recorded_for_a_real_run(self):
+    def test_jitter_off_under_the_harness_and_recorded_for_a_real_run(self):
         b = self.box("counter")  # interval_seconds: 5 in the fixture manifest
         b.write("data/value.txt", "x")
         self.assertEqual(b.run(cycles=1).returncode, EXIT_OK)
         self.assertEqual(b.records()[0]["payload"]["jitter_max_ms"], 0)
+        self.assertEqual(b.records()[0]["payload"]["harness"]["jitter"], "off")
 
         b2 = self.box("counter")
         b2.write("data/value.txt", "x")
-        env = b2.env()
-        del env["SPARK_DAEMON_TEST"]
-        del env["SPARK_DAEMON_TEST_INTERVAL_MS"]
-        p = subprocess.run(
-            [sys.executable, "-I", "-B", os.path.join(ROOT, "bin", "spark-daemon"),
-             "run", "--manifest", b2.manifest, "--max-cycles", "1", *b2.qualified_args()],
-            env=env, capture_output=True, text=True, timeout=30)
+        p = b2.run(cycles=1, production=True)
         self.assertEqual(p.returncode, EXIT_OK, p.stderr)
         self.assertEqual(b2.records()[0]["payload"]["jitter_max_ms"], 250)  # 5s * 5%
 

@@ -123,27 +123,19 @@ class PureHelperTests(unittest.TestCase):
         self.assertEqual(landlock.gaps(policy), [])
 
 
-class SupervisorDomainTestModeTests(unittest.TestCase):
+class SupervisorDomainUnavailableTests(unittest.TestCase):
     """apply_supervisor_domain's PD-15 branch (unavailable/too-old ABI) needs no privilege
     change at all, so these run directly, not forked."""
 
-    def test_unavailable_landlock_is_non_fatal_in_test_mode(self):
-        original = landlock.abi_version
-        landlock.abi_version = lambda: -1
-        try:
-            policy = FakePolicy(output_dir="/tmp", reads=(), deny=())
-            result = landlock.apply_supervisor_domain(policy, test_mode=True)
-        finally:
-            landlock.abi_version = original
-        self.assertEqual(result, {"abi": 0, "status": "unavailable", "gaps": []})
-
-    def test_unavailable_landlock_refuses_outside_test_mode(self):
+    def test_unavailable_landlock_always_refuses(self):
+        # Contract 5 (E-12): no test mode makes it non-fatal (test_unavailable_landlock_is_non_fatal_in_test_mode
+        # is retired; this was test_unavailable_landlock_refuses_outside_test_mode).
         original = landlock.abi_version
         landlock.abi_version = lambda: -1
         try:
             policy = FakePolicy(output_dir="/tmp", reads=(), deny=())
             with self.assertRaises(landlock.LandlockError):
-                landlock.apply_supervisor_domain(policy, test_mode=False)
+                landlock.apply_supervisor_domain(policy)
         finally:
             landlock.abi_version = original
 
@@ -177,7 +169,7 @@ class EnforcementTests(unittest.TestCase):
                 reads=(os.path.join(home, "reads"),),
                 deny=(os.path.join(home, ".ssh"), os.path.join(home, "spark-core", "data")))
             landlock.apply_supervisor_domain(
-                policy, extra_read_paths=landlock.system_read_paths(), test_mode=False)
+                policy, extra_read_paths=landlock.system_read_paths())
             out = []
             out.append(_attempt("read a declared read", lambda: _read(os.path.join(home, "reads/value.txt"))))
             out.append(_attempt("read a denied path", lambda: _read(os.path.join(home, ".ssh/id_test"))))
@@ -198,7 +190,7 @@ class EnforcementTests(unittest.TestCase):
             policy = FakePolicy(output_dir=os.path.join(home, "out"),
                                 reads=(os.path.join(home, "reads"),), deny=())
             landlock.apply_supervisor_domain(
-                policy, extra_read_paths=landlock.system_read_paths(), test_mode=False)
+                policy, extra_read_paths=landlock.system_read_paths())
             # A grandchild applies a strictly narrower domain: read-only, nothing granted
             # on the output directory at all (the AP-04 worker shape).
             def grandchild():
@@ -227,7 +219,7 @@ class EnforcementTests(unittest.TestCase):
             policy = FakePolicy(output_dir=os.path.join(home, "out"),
                                 reads=(os.path.join(home, "reads"),), deny=())
             info = landlock.apply_supervisor_domain(
-                policy, extra_read_paths=landlock.system_read_paths(), test_mode=False)
+                policy, extra_read_paths=landlock.system_read_paths())
             written = os.path.join(home, "out", "payload")
             shutil.copyfile(true_bin, written)          # writing into the output dir is allowed
             os.chmod(written, 0o755)
@@ -244,8 +236,7 @@ class EnforcementTests(unittest.TestCase):
 
         def child():
             policy = FakePolicy(output_dir=os.path.join(home, "out"), reads=(), deny=())
-            landlock.apply_supervisor_domain(policy, extra_read_paths=landlock.system_read_paths(),
-                                             test_mode=False)
+            landlock.apply_supervisor_domain(policy, extra_read_paths=landlock.system_read_paths())
             import _bz2  # noqa: F401  native modules this process has not loaded yet
             import _decimal  # noqa: F401
             import _lzma  # noqa: F401
@@ -267,8 +258,7 @@ class EnforcementTests(unittest.TestCase):
 
         def child():
             policy = FakePolicy(output_dir=os.path.join(home, "out"), reads=(), deny=())
-            landlock.apply_supervisor_domain(policy, extra_read_paths=landlock.system_read_paths(),
-                                             test_mode=False)
+            landlock.apply_supervisor_domain(policy, extra_read_paths=landlock.system_read_paths())
             return {"direct": _exec(true_bin), "via_loader": [_exec(loader, true_bin) for loader in loaders]}
 
         result = _run_in_child(child)
@@ -281,7 +271,7 @@ class EnforcementTests(unittest.TestCase):
         def child():
             policy = FakePolicy(output_dir=os.path.join(home, "out"), reads=(), deny=())
             landlock.apply_supervisor_domain(
-                policy, extra_read_paths=landlock.system_read_paths(), test_mode=False)
+                policy, extra_read_paths=landlock.system_read_paths())
             path = os.path.join(home, "out", "ledger.jsonl")
             results = []
             results.append(_attempt("append", lambda: _write(path, "ab")))

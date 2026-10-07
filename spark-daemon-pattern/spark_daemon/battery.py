@@ -52,7 +52,7 @@ from dataclasses import dataclass
 
 from . import (EXIT_USAGE, LEDGER_NAME, SYSTEM_PATH,
                QUARANTINE_DIR, RESERVED_EVENT_TYPES, guard, landlock, ledger,
-               manifest as manifest_mod, unitgen)
+               unitgen)
 from .canonical import sha256_hex, strict_loads
 
 PATTERN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -71,31 +71,28 @@ class Proc:
 
 
 class Workspace:
-    def __init__(self, manifest_path: str, workdir: str | None):
+    """A disposable HOME for the run checks (contract 5, E-3). The daemon runs from its own
+    folder, under its own manifest: nothing is copied or rewritten. A manifest whose output_dir
+    is absolute gets one recorded harness parameter instead, an output directory inside the
+    workspace. This process's environment is never changed: "~" is expanded against the
+    workspace's home explicitly."""
+
+    def __init__(self, manifest_path: str, workdir: str | None, expect: dict):
         self.root = os.path.realpath(workdir or tempfile.mkdtemp(prefix="spark-battery-"))
         os.makedirs(self.root, exist_ok=True)
         self.home = os.path.join(self.root, "home")
-        self.daemon_dir = os.path.join(self.root, "daemon")
-        for d in (self.home, self.daemon_dir):
-            os.makedirs(d, mode=0o700, exist_ok=True)
-        src_dir = os.path.dirname(os.path.abspath(manifest_path))
-        shutil.copyfile(os.path.join(src_dir, "daemon.py"), os.path.join(self.daemon_dir, "daemon.py"))
-        fixture = os.path.join(src_dir, "fixture_home")
+        os.makedirs(self.home, mode=0o700, exist_ok=True)
+        self.manifest = os.path.abspath(manifest_path)
+        self.daemon_dir = os.path.dirname(self.manifest)
+        fixture = os.path.join(self.daemon_dir, "fixture_home")
         if os.path.isdir(fixture):
             shutil.copytree(fixture, self.home, dirs_exist_ok=True)
-        data = manifest_mod.to_dict(manifest_path)
-        self.rewrites = []
-        if isinstance(data.get("output_dir"), str) and not data["output_dir"].startswith("~"):
-            new = f"~/.battery-output/{data.get('name', 'daemon')}"
-            self.rewrites.append(f"output_dir {data['output_dir']} -> {new}")
-            data["output_dir"] = new
-        self.manifest = os.path.join(self.daemon_dir, "manifest.json")
-        manifest_mod.dump(data, self.manifest)
-        os.environ["SPARK_DAEMON_HOME"] = self.home       # this process expands "~" the same way
+        self.expect = dict(expect)
         self.canary = os.path.join(self.home, "spark-core", "data", "canary.txt")
         os.makedirs(os.path.dirname(self.canary), exist_ok=True)
         with open(self.canary, "w") as fh:
             fh.write("canary: must never be read\n")
+        self.harness = {"interval_ms": TEST_INTERVAL_MS}
         self.m = None
         self.output = None
         self.ledger = None
@@ -103,22 +100,41 @@ class Workspace:
     def bind_manifest(self, m):
         from .paths import expand
         self.m = m
-        self.output = expand(m.output_dir)
+        if not m.output_dir.startswith("~"):
+            self.harness["output_dir"] = os.path.join(self.home, ".battery-output", m.name)
+        self.output = expand(self.harness.get("output_dir", m.output_dir), self.home)
         self.ledger = os.path.join(self.output, LEDGER_NAME)
+
+    def policy(self):
+        """The policy the daemon gets in the workspace, built without touching this process's
+        environment."""
+        return guard.Policy(self.m, output_dir=self.harness.get("output_dir"), home=self.home)
 
     def env(self, **extra):
         env = {"HOME": self.home, "SPARK_DAEMON_HOME": self.home, "PATH": SYSTEM_PATH,
-               "LANG": "C.UTF-8", "SPARK_DAEMON_TEST": "1",
-               "SPARK_DAEMON_TEST_INTERVAL_MS": str(TEST_INTERVAL_MS), "PYTHONDONTWRITEBYTECODE": "1"}
+               "LANG": "C.UTF-8", "PYTHONDONTWRITEBYTECODE": "1"}
         env.update({k: v for k, v in extra.items() if v is not None})
         return env
 
     def cmd(self, *args):
         return [sys.executable, "-I", "-B", ENTRY, *args]
 
-    def run_cmd(self, *args, cycles=None):
-        extra = ["--max-cycles", str(cycles)] if cycles is not None else []
-        return self.cmd("run", "--manifest", self.manifest, *extra)
+    def probe(self, name, *args):
+        extra = ["--output-dir", self.harness["output_dir"]] if "output_dir" in self.harness else []
+        return self.cmd(name, "--manifest", self.manifest, *args, *extra)
+
+    def run_cmd(self, cycles=None, **params):
+        """The harness entry with this workspace's recorded parameters, plus any given here
+        (blind_limit_ms for DB-20, audit="record" for DB-03), and the files' digests."""
+        from .qualify import expect_args
+        given = {**self.harness, **params}
+        argv = ["harness", "--manifest", self.manifest, *expect_args(self.expect)]
+        for key in ("interval_ms", "blind_limit_ms", "cycle_budget_ms", "output_dir", "audit"):
+            if key in given:
+                argv += [f"--{key.replace('_', '-')}", str(given[key])]
+        if cycles is not None:
+            argv += ["--max-cycles", str(cycles)]
+        return self.cmd(*argv)
 
     def reset_output(self):
         if self.output and os.path.exists(self.output):
@@ -207,7 +223,7 @@ def db03(ws, c, cycles=5):
     ws.reset_output()
     exclude = [ws.output]
     before = _snapshot(ws.home, exclude) | {f"daemon/{k}": v for k, v in _snapshot(ws.daemon_dir, []).items()}
-    p = run_proc(ws.run_cmd(cycles=cycles), ws.env(SPARK_DAEMON_AUDIT="record"))
+    p = run_proc(ws.run_cmd(cycles=cycles, audit="record"), ws.env())
     after = _snapshot(ws.home, exclude) | {f"daemon/{k}": v for k, v in _snapshot(ws.daemon_dir, []).items()}
     audits = [line for line in p.stderr.splitlines() if "spark_daemon_audit" in line]
     changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
@@ -379,7 +395,7 @@ def _fault(ws, c, inject_args, label):
 
 
 def db10(ws, c, seed):
-    p = run_proc(ws.cmd("probe-digest", "--manifest", ws.manifest, "--seed", str(seed)), ws.env())
+    p = run_proc(ws.probe("probe-digest", "--seed", str(seed)), ws.env())
     try:
         result = json.loads(p.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
@@ -471,7 +487,7 @@ def db12(ws, c):
 
 
 def db13(ws, c):
-    p = run_proc(ws.cmd("probe-policy", "--manifest", ws.manifest, "--canary", ws.canary), ws.env())
+    p = run_proc(ws.probe("probe-policy", "--canary", ws.canary), ws.env())
     try:
         result = json.loads(p.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
@@ -516,7 +532,7 @@ def db20(ws, c, cycles=12, limit_intervals=5):
     cycles and must not stop with SENSE_BLIND."""
     ws.reset_output()
     limit_ms = limit_intervals * TEST_INTERVAL_MS
-    p = run_proc(ws.run_cmd(cycles=cycles), ws.env(SPARK_DAEMON_TEST_BLIND_LIMIT_MS=str(limit_ms)))
+    p = run_proc(ws.run_cmd(cycles=cycles, blind_limit_ms=limit_ms), ws.env())
     recs = _records(ws.ledger)
     blind = [r["payload"] for r in recs
              if r["event_type"] == "DAEMON_ERROR" and r["payload"].get("category") == "SENSE_BLIND"]
@@ -663,7 +679,7 @@ def db16(ws, c):
     with open(ws.ledger, "rb") as fh:
         before = fh.read()
     mtime = os.stat(ws.ledger).st_mtime_ns
-    outs = [run_proc(ws.cmd("verify", "--manifest", ws.manifest), ws.env()) for _ in range(2)]
+    outs = [run_proc(ws.probe("verify"), ws.env()) for _ in range(2)]
     with open(ws.ledger, "rb") as fh:
         after = fh.read()
     problems = []
@@ -683,7 +699,7 @@ def db16(ws, c):
 
 
 def db17(ws, c):
-    p = run_proc(ws.cmd("probe-landlock", "--manifest", ws.manifest, "--canary", ws.canary), ws.env())
+    p = run_proc(ws.probe("probe-landlock", "--canary", ws.canary), ws.env())
     try:
         result = json.loads(p.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
@@ -692,6 +708,9 @@ def db17(ws, c):
     status = result.get("status")
     if status == "N/A":
         c.state, c.evidence = "N/A", result.get("reason", "Landlock unavailable")
+        return
+    if status == "FAIL":
+        c.state, c.evidence = "FAIL", f"Landlock refused: {result.get('reason', '')}"
         return
     if result.get("ok"):
         info = result.get("landlock", {})
@@ -729,7 +748,7 @@ def db18(ws, c):
             problems.append(f"recorded unavailable, but this host now reports usable ABI {fresh_abi}")
     else:
         problems.append(f"unexpected status {info['status']!r} (expected enforced or unavailable)")
-    fresh_gaps = landlock.gaps(guard.Policy(ws.m))
+    fresh_gaps = landlock.gaps(ws.policy())
     if info["gaps"] != fresh_gaps:
         problems.append(f"recorded gaps {info['gaps']} do not match freshly computed gaps {fresh_gaps}")
     c.state = "FAIL" if problems else "PASS"
@@ -753,7 +772,7 @@ def main(manifest_path: str, *, seed: int, quick: bool, workdir: str | None, thr
         j.ws = Workspace.__new__(Workspace)            # nothing ran: a report folder only
         j.ws.root = os.path.realpath(workdir or tempfile.mkdtemp(prefix="spark-battery-"))
         os.makedirs(j.ws.root, exist_ok=True)
-        j.ws.rewrites, j.ws.m = [], None
+        j.ws.harness, j.ws.m = {}, None
     report = judge.report(j)
     report_path = os.path.join(j.ws.root, "battery-report.json")
     with open(report_path, "w") as fh:

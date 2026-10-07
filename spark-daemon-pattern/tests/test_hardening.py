@@ -218,10 +218,8 @@ class RuntimeHardeningTests(unittest.TestCase):
         # deleted the running instance's in-flight files (for git-watch, its index copy).
         sb = Sandbox("counter")
         try:
-            first = subprocess.Popen(
-                [sys.executable, "-I", "-B", ENTRY, "run", "--manifest", sb.manifest],
-                env=sb.env(SPARK_DAEMON_TEST_INTERVAL_MS="60000"), stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL)
+            first = subprocess.Popen(sb.argv(None, interval_ms=60000), env=sb.env(), stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL)
             try:
                 ledger = sb.ledger_path
                 for _ in range(100):

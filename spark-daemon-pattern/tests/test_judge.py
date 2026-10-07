@@ -107,10 +107,14 @@ class NoStandaloneJudgeTests(unittest.TestCase):
             j = judge.run("validate", os.path.join(tmp, "manifest.json"))
             from spark_daemon import manifest
             self.assertEqual(j.m.sha256, manifest.load(os.path.join(tmp, "manifest.json")).sha256)
-            self.assertNotEqual(j.ws.m.sha256, j.m.sha256)
+            # Contract 5 (E-3): no copy. The run checks bind the same manifest, and the absolute
+            # output_dir is redirected by one recorded harness parameter.
+            self.assertIs(j.ws.m, j.m)
             rep = judge.report(j)
             self.assertEqual(rep["manifest_sha256"], j.m.sha256)
             self.assertEqual(rep["manifest"]["output_dir"], "/srv/example/logs/meminfo-watch")
+            self.assertEqual(rep["harness"]["output_dir"], os.path.join(j.ws.home, ".battery-output", "meminfo-watch"))
+            self.assertEqual(sorted(os.listdir(tmp)), ["daemon.py", "manifest.json"])     # nothing written beside it
             self.assertEqual(j.result, "PASS", [(c.id, c.state, c.evidence) for c in j.checks])
         finally:
             shutil.rmtree(tmp)

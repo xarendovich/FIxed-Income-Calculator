@@ -26,9 +26,9 @@ ADJUDICATION-AP.md, AP-01, for the full table across ABI 1/3/4/7):
   - UDP traffic, or anything before ABI 4 (Landlock's network rules did not exist yet).
 
 Policy PD-15 (unresolved pending Class C): Landlock unavailable, or older than
-MIN_USABLE_ABI, is a start-up refusal outside test mode (apply_supervisor_domain raises),
-and a recorded, non-fatal gap in test mode, so the self-tests and the battery still run on
-whatever the CI or developer kernel offers.
+MIN_USABLE_ABI, is a start-up refusal (apply_supervisor_domain raises). Since contract 5
+there is no test mode that tolerates it: the self-tests and the battery need a kernel with
+Landlock too, and DB-17's probe reports N/A on one without it.
 """
 
 import ctypes
@@ -196,7 +196,7 @@ def gaps(policy) -> list:
     return sorted({denied for denied in policy.deny for read in policy.reads if within(denied, read)})
 
 
-def apply_supervisor_domain(policy, *, extra_read_paths=(), test_mode: bool) -> dict:
+def apply_supervisor_domain(policy, *, extra_read_paths=()) -> dict:
     """The domain runtime.py applies once, before the audit hook and before daemon code is
     imported: read without execute on the system and interpreter paths (system_read_paths()),
     the daemon's own folder and every declared read path that exists; execute nowhere (v5, R-2);
@@ -204,20 +204,17 @@ def apply_supervisor_domain(policy, *, extra_read_paths=(), test_mode: bool) -> 
     point - guard.prepare_output_dir ran earlier). No TCP bind or connect from ABI 4; signal
     scoping from ABI 6 (PD-15/L2). r4.6 (HF-36): execute was granted everywhere read was.
 
-    Returns a dict for DAEMON_START.landlock: {abi, status, gaps}. status is "enforced" or
-    "unavailable" - never "partially enforced": a failed rule or restrict_self call raises
-    (fail closed) rather than returning a weaker status, except when test_mode makes an
-    unavailable or too-old Landlock non-fatal (PD-15)."""
+    Returns a dict for DAEMON_START.landlock: {abi, status, gaps}, status "enforced". Never
+    "partially enforced": an unavailable or too-old Landlock, a failed rule or a failed
+    restrict_self call raises (fail closed, PD-15). Since contract 5 there is no test mode
+    that makes an unavailable Landlock non-fatal."""
     try:
         abi = abi_version()
     except OSError:
         abi = -1
     if abi < MIN_USABLE_ABI:
-        if not test_mode:
-            raise LandlockError(
-                f"Landlock ABI {abi} unavailable or below the minimum usable ABI {MIN_USABLE_ABI}; "
-                "PD-15 requires it outside test mode")
-        return {"abi": max(abi, 0), "status": "unavailable", "gaps": []}
+        raise LandlockError(
+            f"Landlock ABI {abi} unavailable or below the minimum usable ABI {MIN_USABLE_ABI}; PD-15 requires it")
 
     rules = []
     for path in extra_read_paths:

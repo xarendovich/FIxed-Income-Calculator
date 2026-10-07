@@ -59,11 +59,15 @@ class Policy:
 
     __slots__ = ("output_dir", "reads", "deny", "notify_target")
 
-    def __init__(self, manifest, notify_socket=None):
+    def __init__(self, manifest, notify_socket=None, output_dir=None, home=None):
+        # output_dir: the harness's recorded override for a manifest whose output_dir is
+        # absolute (contract 5); validated by the caller against the manifest's placement rules.
+        # home: what "~" expands to when not this process's home() (the battery, for its
+        # workspace, without changing its own environment).
         values = {
-            "output_dir": expand(manifest.output_dir),
-            "reads": tuple(expand(p) for p in manifest.reads),
-            "deny": tuple(expand(p) for p in manifest.all_deny),
+            "output_dir": expand(output_dir if output_dir is not None else manifest.output_dir, home),
+            "reads": tuple(expand(p, home) for p in manifest.reads),
+            "deny": tuple(expand(p, home) for p in manifest.all_deny),
             "notify_target": _notify_target(notify_socket if notify_socket is not None
                                             else os.environ.get("NOTIFY_SOCKET")),
         }

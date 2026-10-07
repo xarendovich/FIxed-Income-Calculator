@@ -45,7 +45,7 @@ class CycleDeadlineTests(unittest.TestCase):
             os.makedirs(os.path.join(sb.home, "data"), exist_ok=True)
             os.mkfifo(os.path.join(sb.home, "data", "fifo"))     # open() blocks: no writer, ever
         started = time.monotonic()
-        p = sb.run(cycles=2, timeout=60, SPARK_DAEMON_TEST_CYCLE_BUDGET_MS="400")
+        p = sb.run(cycles=2, timeout=60, cycle_budget_ms=400)
         return p, time.monotonic() - started, sb.records()
 
     def assertFailsWithinTheDeadline(self, kind):
@@ -54,7 +54,7 @@ class CycleDeadlineTests(unittest.TestCase):
         errors = [r["payload"] for r in records if r["event_type"] == "DAEMON_ERROR"]
         self.assertEqual(errors[0], {"category": "CYCLE_BUDGET_EXCEEDED", "exception_type": "CycleBudgetExceeded"},
                          errors)
-        self.assertEqual(records[0]["payload"]["test_overrides"]["cycle_budget_ms"], 400)
+        self.assertEqual(records[0]["payload"]["harness"]["cycle_budget_ms"], 400)
         # Two cycles of at most 0.4 s each, plus start-up and stop; without the deadline every one
         # of these would hang until the test's own 60 s timeout.
         self.assertLess(elapsed, 8, elapsed)
@@ -73,8 +73,8 @@ class CycleDeadlineTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, tmp)
         sb = Sandbox(tmp)
         self.addCleanup(shutil.rmtree, sb.tmp)
-        p = sb.run(cycles=None, timeout=60, SPARK_DAEMON_TEST_CYCLE_BUDGET_MS="200",
-                   SPARK_DAEMON_TEST_BLIND_LIMIT_MS="900")
+        p = sb.run(cycles=None, timeout=60, cycle_budget_ms=200,
+                   blind_limit_ms=900)
         self.assertEqual(p.returncode, 78, p.stderr)
         blind = [r["payload"] for r in sb.records() if r["payload"].get("category") == "SENSE_BLIND"]
         self.assertEqual(blind[0]["last_cause"], "CYCLE_BUDGET_EXCEEDED")

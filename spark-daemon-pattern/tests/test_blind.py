@@ -64,10 +64,10 @@ class BlindPeriodTests(unittest.TestCase):
     def test_always_unsettled_stops_at_the_limit(self):
         sb = self.sandbox(MODE_DRIVEN)
         sb.write("data/mode.txt", "busy")
-        p = sb.run(cycles=None, SPARK_DAEMON_TEST_BLIND_LIMIT_MS="600")
+        p = sb.run(cycles=None, blind_limit_ms=600)
         self.assertEqual(p.returncode, EXIT_SENSE_BLIND, p.stderr)
         recs = sb.records()
-        self.assertEqual(recs[0]["payload"]["test_overrides"]["blind_limit_ms"], 600)
+        self.assertEqual(recs[0]["payload"]["harness"]["blind_limit_ms"], 600)
         last = recs[-1]
         self.assertEqual(last["event_type"], "DAEMON_ERROR")
         payload = last["payload"]
@@ -83,7 +83,7 @@ class BlindPeriodTests(unittest.TestCase):
     def test_failed_cycles_count_towards_the_limit(self):
         # r2's silent-outage shape: a daemon failing every cycle kept pinging the watchdog forever.
         sb = self.sandbox("def sense(ctx):\n    raise ValueError('no')\n" + DECIDE)
-        p = sb.run(cycles=None, SPARK_DAEMON_TEST_BLIND_LIMIT_MS="600")
+        p = sb.run(cycles=None, blind_limit_ms=600)
         self.assertEqual(p.returncode, EXIT_SENSE_BLIND, p.stderr)
         errors = [r["payload"] for r in sb.records() if r["event_type"] == "DAEMON_ERROR"]
         self.assertEqual(errors[0], {"category": "SENSE_FAILED", "exception_type": "ValueError"})
@@ -97,8 +97,7 @@ class BlindPeriodTests(unittest.TestCase):
         sb = self.sandbox(MODE_DRIVEN)
         sb.write("data/value.txt", "1")
         sb.write("data/mode.txt", "busy")
-        proc = subprocess.Popen([sys.executable, "-I", "-B", ENTRY, "run", "--manifest", sb.manifest,
-                                 "--max-cycles", "40"], env=sb.env(SPARK_DAEMON_TEST_BLIND_LIMIT_MS="1500"),
+        proc = subprocess.Popen(sb.argv(40, blind_limit_ms=1500), env=sb.env(),
                                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
         try:
             for mode in ("idle", "busy", "idle"):
@@ -117,10 +116,7 @@ class BlindPeriodTests(unittest.TestCase):
     # ---- r4.0 (PD-70): blindness survives restarts; heartbeats tell quiet from dead ----
 
     def popen(self, sb, limit_ms, cycles=None):
-        cmd = [sys.executable, "-I", "-B", ENTRY, "run", "--manifest", sb.manifest]
-        if cycles is not None:
-            cmd += ["--max-cycles", str(cycles)]
-        return subprocess.Popen(cmd, env=sb.env(SPARK_DAEMON_TEST_BLIND_LIMIT_MS=str(limit_ms)),
+        return subprocess.Popen(sb.argv(cycles, blind_limit_ms=limit_ms), env=sb.env(),
                                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
 
     def finish(self, p, timeout=30):
@@ -175,8 +171,8 @@ class BlindPeriodTests(unittest.TestCase):
     def popen_shifted(self, sb, limit_ms, shift_seconds):
         """Runs the daemon with its wall clock `shift_seconds` behind; the system clock is untouched."""
         code = self.SHIFTED.format(shift=shift_seconds, entry=ENTRY)
-        return subprocess.Popen([sys.executable, "-I", "-B", "-c", code, "run", "--manifest", sb.manifest],
-                                env=sb.env(SPARK_DAEMON_TEST_BLIND_LIMIT_MS=str(limit_ms)),
+        args = sb.argv(None, blind_limit_ms=limit_ms)[4:]          # "harness --manifest ..." after the entry
+        return subprocess.Popen([sys.executable, "-I", "-B", "-c", code, *args], env=sb.env(),
                                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
 
     def test_a_backward_clock_step_does_not_hide_blindness(self):
@@ -296,15 +292,21 @@ class BlindPeriodTests(unittest.TestCase):
         errors = [r["payload"] for r in sb.records() if r["event_type"] == "DAEMON_ERROR"]
         self.assertEqual(errors, [{"category": "SENSE_FAILED", "exception_type": "ValueError"}])
 
-    def test_the_override_is_ignored_outside_test_mode(self):
+    def test_a_production_run_takes_no_harness_parameter(self):
+        # Contract 5 (E-12): `run` has no test switch to read and no harness option to accept, so
+        # a blind limit cannot be shortened (or anything else changed) in production. Replaces
+        # test_the_override_is_ignored_outside_test_mode, which set the 4.x environment switches.
         sb = self.sandbox(MODE_DRIVEN)
         sb.write("data/mode.txt", "busy")
-        # Outside test mode the manifest's 600 s applies, and the interval is the manifest's
-        # 5 s, so one cycle then max-cycles stops it well inside the limit.
-        p = sb.run(cycles=1, qualified=True, SPARK_DAEMON_TEST="0", SPARK_DAEMON_TEST_BLIND_LIMIT_MS="100",
-                   SPARK_DAEMON_AUDIT="enforce")
-        self.assertEqual(p.returncode, EXIT_OK, p.stderr)
-        self.assertNotIn("blind_limit_ms", sb.records()[0]["payload"]["test_overrides"])
+        refused = subprocess.run(sb.argv(1, production=True) + ["--blind-limit-ms", "100"], env=sb.env(),
+                                 capture_output=True, text=True, timeout=30)
+        self.assertEqual(refused.returncode, 2, refused.stderr)          # argparse: unknown option
+        p = sb.run(cycles=1, production=True,
+                   env={"SPARK_DAEMON_TEST": "1", "SPARK_DAEMON_TEST_BLIND_LIMIT_MS": "100"})
+        self.assertEqual(p.returncode, EXIT_OK, p.stderr)               # the 4.x switches do nothing
+        start = sb.records()[0]["payload"]
+        self.assertIsNone(start["harness"])
+        self.assertEqual(start["interval_ms"], 5000)
 
 
 def example():

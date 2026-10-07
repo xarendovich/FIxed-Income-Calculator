@@ -82,27 +82,33 @@ class RuntimeGateTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.sb.tmp)
 
-    def test_an_unqualified_start_is_refused_outside_test_mode(self):
-        p = self.sb.run(cycles=1, SPARK_DAEMON_TEST="0")
-        self.assertEqual(p.returncode, EXIT_POLICY, p.stderr)
-        self.assertIn("not qualified", p.stderr)
-        self.assertEqual(self.sb.records(), [])
+    def test_an_unqualified_start_is_refused_everywhere(self):
+        # Contract 5 (E-12): no start without the digests, under the harness either. Replaces
+        # test_an_unqualified_start_is_refused_outside_test_mode.
+        for production in (True, False):
+            with self.subTest(production=production):
+                p = self.sb.run(cycles=1, production=production, qualified=False)
+                self.assertEqual(p.returncode, EXIT_POLICY, p.stderr)
+                self.assertIn("not qualified", p.stderr)
+                self.assertEqual(self.sb.records(), [])
 
-    def test_changed_code_is_refused_even_in_test_mode(self):
-        args = self.sb.qualified_args()
+    def test_changed_code_is_refused_everywhere(self):
+        # Replaces test_changed_code_is_refused_even_in_test_mode.
+        argv = {production: self.sb.argv(1, production=production) for production in (True, False)}
         with open(os.path.join(self.sb.daemon_dir, "daemon.py"), "a") as fh:
             fh.write("\n# changed after qualification\n")
-        p = subprocess.run([sys.executable, "-I", "-B", ENTRY, "run", "--manifest", self.sb.manifest,
-                            "--max-cycles", "1", *args], env=self.sb.env(), capture_output=True, text=True,
-                           timeout=30)
-        self.assertEqual(p.returncode, EXIT_POLICY, p.stderr)
-        self.assertIn("daemon_code_sha256", p.stderr)
-        self.assertEqual(self.sb.records(), [])
+        for production, args in argv.items():
+            with self.subTest(production=production):
+                p = subprocess.run(args, env=self.sb.env(), capture_output=True, text=True, timeout=30)
+                self.assertEqual(p.returncode, EXIT_POLICY, p.stderr)
+                self.assertIn("daemon_code_sha256", p.stderr)
+                self.assertEqual(self.sb.records(), [])
 
     def test_a_qualified_start_runs_and_says_so(self):
-        p = self.sb.run(cycles=1, qualified=True)
+        p = self.sb.run(cycles=1, production=True)
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIs(self.sb.records()[0]["payload"]["qualified"], True)
+        self.assertIsNone(self.sb.records()[0]["payload"]["harness"])
 
     def test_partial_expectations_are_a_usage_error(self):
         args = self.sb.qualified_args()[:2]
@@ -232,7 +238,7 @@ class ProjectedUnitTests(unittest.TestCase):
             p, text = self.project()
             self.assertEqual(p.returncode, 0, p.stderr)       # installing does not repeat the runtime's check
             args = re.search(r"^ExecStart=\S+ -I -B \S+ (run .*)$", text, re.M).group(1).split()
-            run = cli(*args, "--max-cycles", "1", env=dict(self.env, SPARK_DAEMON_TEST="1"), timeout=60)
+            run = cli(*args, "--max-cycles", "1", env=self.env, timeout=60)
             self.assertEqual(run.returncode, EXIT_POLICY, run.stderr)
             self.assertIn("daemon_code_sha256", run.stderr)
         finally:
