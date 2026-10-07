@@ -76,7 +76,12 @@ def _jcs_key_order(value, _depth=0):
     if _depth > MAX_DEPTH:
         raise CanonicalError("nesting too deep")
     if isinstance(value, dict):
-        ordered = sorted(value.items(), key=lambda kv: kv[0].encode("utf-16-be"))
+        try:
+            ordered = sorted(value.items(), key=lambda kv: kv[0].encode("utf-16-be"))
+        except UnicodeEncodeError:
+            # HF-44: a key with a lone surrogate (a JSON "\ud800" escape) has no UTF-16 order; a
+            # ledger line carrying one is not canonical, never a crash.
+            raise CanonicalError("a key is not valid Unicode (lone surrogate)") from None
         return {k: _jcs_key_order(v, _depth + 1) for k, v in ordered}
     if isinstance(value, list):
         return [_jcs_key_order(v, _depth + 1) for v in value]
@@ -114,5 +119,9 @@ def strict_loads(line: bytes):
         raise CanonicalError("NaN and Infinity are not allowed")
 
     text = line.decode("utf-8")
-    return json.loads(text, object_pairs_hook=pairs, parse_float=no_float,
-                      parse_constant=no_constant)
+    try:
+        return json.loads(text, object_pairs_hook=pairs, parse_float=no_float,
+                          parse_constant=no_constant)
+    except RecursionError:
+        # HF-43: nesting deeper than the parser's recursion limit is unparseable, never a crash.
+        raise CanonicalError("nesting too deep to parse") from None

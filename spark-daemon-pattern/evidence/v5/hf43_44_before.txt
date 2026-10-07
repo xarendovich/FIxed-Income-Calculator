@@ -1,0 +1,243 @@
+EEFFEEE
+======================================================================
+ERROR: test_both_verifiers_report_a_break_and_agree (test_independent.CorruptionIsNeverACrashTests.test_both_verifiers_report_a_break_and_agree) [deep nesting (HF-43)]
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<pattern>/tests/test_independent.py", line 236, in test_both_verifiers_report_a_break_and_agree
+    self.assertEqual(status.cross_check(path, self.name, self.max_bytes), [])
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/status.py", line 73, in cross_check
+    a, b = primary_outcome(path, daemon, max_bytes), independent_outcome(path, daemon, max_bytes)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/status.py", line 52, in primary_outcome
+    scan = ledger.verify_file(path, daemon, max_bytes)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/ledger.py", line 134, in verify_file
+    return scan(fh, daemon, max_bytes, on_record)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/ledger.py", line 122, in scan
+    record, sha = verify_line(line[:-1], seq + 1, head, daemon, max_bytes, offset)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/ledger.py", line 78, in verify_line
+    record = strict_loads(body)
+             ^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 117, in strict_loads
+    return json.loads(text, object_pairs_hook=pairs, parse_float=no_float,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/json/__init__.py", line 359, in loads
+    return cls(**kw).decode(s)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/json/decoder.py", line 337, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/json/decoder.py", line 353, in raw_decode
+    obj, end = self.scan_once(s, idx)
+               ^^^^^^^^^^^^^^^^^^^^^^
+RecursionError: maximum recursion depth exceeded while decoding a JSON array from a unicode string
+
+======================================================================
+ERROR: test_both_verifiers_report_a_break_and_agree (test_independent.CorruptionIsNeverACrashTests.test_both_verifiers_report_a_break_and_agree) [lone-surrogate key (HF-44)]
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<pattern>/tests/test_independent.py", line 236, in test_both_verifiers_report_a_break_and_agree
+    self.assertEqual(status.cross_check(path, self.name, self.max_bytes), [])
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/status.py", line 73, in cross_check
+    a, b = primary_outcome(path, daemon, max_bytes), independent_outcome(path, daemon, max_bytes)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/status.py", line 52, in primary_outcome
+    scan = ledger.verify_file(path, daemon, max_bytes)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/ledger.py", line 134, in verify_file
+    return scan(fh, daemon, max_bytes, on_record)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/ledger.py", line 122, in scan
+    record, sha = verify_line(line[:-1], seq + 1, head, daemon, max_bytes, offset)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/ledger.py", line 91, in verify_line
+    if canonical_bytes(record) != body:
+       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 87, in canonical_bytes
+    text = json.dumps(_jcs_key_order(to_json_value(value)), sort_keys=False,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 80, in _jcs_key_order
+    return {k: _jcs_key_order(v, _depth + 1) for k, v in ordered}
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 80, in <dictcomp>
+    return {k: _jcs_key_order(v, _depth + 1) for k, v in ordered}
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 79, in _jcs_key_order
+    ordered = sorted(value.items(), key=lambda kv: kv[0].encode("utf-16-be"))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 79, in <lambda>
+    ordered = sorted(value.items(), key=lambda kv: kv[0].encode("utf-16-be"))
+                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'utf-16-be' codec can't encode character '\ud800' in position 0: surrogates not allowed
+
+======================================================================
+ERROR: test_seeded_mutations_agree (test_independent.DifferentialFuzzTests.test_seeded_mutations_agree) (mutation=720)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<pattern>/tests/test_independent.py", line 294, in test_seeded_mutations_agree
+    a = status.primary_outcome(path, self.name, self.max_bytes)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/status.py", line 52, in primary_outcome
+    scan = ledger.verify_file(path, daemon, max_bytes)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/ledger.py", line 134, in verify_file
+    return scan(fh, daemon, max_bytes, on_record)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/ledger.py", line 122, in scan
+    record, sha = verify_line(line[:-1], seq + 1, head, daemon, max_bytes, offset)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/ledger.py", line 91, in verify_line
+    if canonical_bytes(record) != body:
+       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 87, in canonical_bytes
+    text = json.dumps(_jcs_key_order(to_json_value(value)), sort_keys=False,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 80, in _jcs_key_order
+    return {k: _jcs_key_order(v, _depth + 1) for k, v in ordered}
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 80, in <dictcomp>
+    return {k: _jcs_key_order(v, _depth + 1) for k, v in ordered}
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 80, in _jcs_key_order
+    return {k: _jcs_key_order(v, _depth + 1) for k, v in ordered}
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 80, in <dictcomp>
+    return {k: _jcs_key_order(v, _depth + 1) for k, v in ordered}
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 79, in _jcs_key_order
+    ordered = sorted(value.items(), key=lambda kv: kv[0].encode("utf-16-be"))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 79, in <lambda>
+    ordered = sorted(value.items(), key=lambda kv: kv[0].encode("utf-16-be"))
+                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'utf-16-be' codec can't encode character '\ud800' in position 4: surrogates not allowed
+
+======================================================================
+ERROR: test_seeded_mutations_agree (test_independent.DifferentialFuzzTests.test_seeded_mutations_agree) (mutation=787)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<pattern>/tests/test_independent.py", line 294, in test_seeded_mutations_agree
+    a = status.primary_outcome(path, self.name, self.max_bytes)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/status.py", line 52, in primary_outcome
+    scan = ledger.verify_file(path, daemon, max_bytes)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/ledger.py", line 134, in verify_file
+    return scan(fh, daemon, max_bytes, on_record)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/ledger.py", line 122, in scan
+    record, sha = verify_line(line[:-1], seq + 1, head, daemon, max_bytes, offset)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/ledger.py", line 91, in verify_line
+    if canonical_bytes(record) != body:
+       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 87, in canonical_bytes
+    text = json.dumps(_jcs_key_order(to_json_value(value)), sort_keys=False,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 80, in _jcs_key_order
+    return {k: _jcs_key_order(v, _depth + 1) for k, v in ordered}
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 80, in <dictcomp>
+    return {k: _jcs_key_order(v, _depth + 1) for k, v in ordered}
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 79, in _jcs_key_order
+    ordered = sorted(value.items(), key=lambda kv: kv[0].encode("utf-16-be"))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 79, in <lambda>
+    ordered = sorted(value.items(), key=lambda kv: kv[0].encode("utf-16-be"))
+                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'utf-16-be' codec can't encode character '\ud800' in position 0: surrogates not allowed
+
+======================================================================
+ERROR: test_seeded_mutations_agree (test_independent.DifferentialFuzzTests.test_seeded_mutations_agree) (mutation=1042)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<pattern>/tests/test_independent.py", line 294, in test_seeded_mutations_agree
+    a = status.primary_outcome(path, self.name, self.max_bytes)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/status.py", line 52, in primary_outcome
+    scan = ledger.verify_file(path, daemon, max_bytes)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/ledger.py", line 134, in verify_file
+    return scan(fh, daemon, max_bytes, on_record)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/ledger.py", line 122, in scan
+    record, sha = verify_line(line[:-1], seq + 1, head, daemon, max_bytes, offset)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/ledger.py", line 91, in verify_line
+    if canonical_bytes(record) != body:
+       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 87, in canonical_bytes
+    text = json.dumps(_jcs_key_order(to_json_value(value)), sort_keys=False,
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 80, in _jcs_key_order
+    return {k: _jcs_key_order(v, _depth + 1) for k, v in ordered}
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 80, in <dictcomp>
+    return {k: _jcs_key_order(v, _depth + 1) for k, v in ordered}
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 79, in _jcs_key_order
+    ordered = sorted(value.items(), key=lambda kv: kv[0].encode("utf-16-be"))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<pattern>/spark_daemon/canonical.py", line 79, in <lambda>
+    ordered = sorted(value.items(), key=lambda kv: kv[0].encode("utf-16-be"))
+                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'utf-16-be' codec can't encode character '\ud800' in position 14: surrogates not allowed
+
+======================================================================
+FAIL: test_the_daemon_refuses_with_65_and_status_says_corrupt (test_independent.CorruptionIsNeverACrashTests.test_the_daemon_refuses_with_65_and_status_says_corrupt) [deep nesting (HF-43)]
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<pattern>/tests/test_independent.py", line 250, in test_the_daemon_refuses_with_65_and_status_says_corrupt
+    self.assertEqual(p.returncode, 65, p.stderr)
+AssertionError: 1 != 65 : Traceback (most recent call last):
+  File "<pattern>/bin/spark-daemon", line 14, in <module>
+  File "<pattern>/spark_daemon/cli.py", line 199, in main
+  File "<pattern>/spark_daemon/runtime.py", line 287, in run
+  File "<pattern>/spark_daemon/ledger.py", line 160, in recover
+  File "<pattern>/spark_daemon/ledger.py", line 134, in verify_file
+  File "<pattern>/spark_daemon/ledger.py", line 122, in scan
+  File "<pattern>/spark_daemon/ledger.py", line 78, in verify_line
+  File "<pattern>/spark_daemon/canonical.py", line 117, in strict_loads
+  File "/usr/lib/python3.11/json/__init__.py", line 359, in loads
+    return cls(**kw).decode(s)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/json/decoder.py", line 337, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/json/decoder.py", line 353, in raw_decode
+    obj, end = self.scan_once(s, idx)
+               ^^^^^^^^^^^^^^^^^^^^^^
+RecursionError: maximum recursion depth exceeded while decoding a JSON array from a unicode string
+
+
+======================================================================
+FAIL: test_the_daemon_refuses_with_65_and_status_says_corrupt (test_independent.CorruptionIsNeverACrashTests.test_the_daemon_refuses_with_65_and_status_says_corrupt) [lone-surrogate key (HF-44)]
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<pattern>/tests/test_independent.py", line 250, in test_the_daemon_refuses_with_65_and_status_says_corrupt
+    self.assertEqual(p.returncode, 65, p.stderr)
+AssertionError: 1 != 65 : Traceback (most recent call last):
+  File "<pattern>/bin/spark-daemon", line 14, in <module>
+  File "<pattern>/spark_daemon/cli.py", line 199, in main
+  File "<pattern>/spark_daemon/runtime.py", line 287, in run
+  File "<pattern>/spark_daemon/ledger.py", line 160, in recover
+  File "<pattern>/spark_daemon/ledger.py", line 134, in verify_file
+  File "<pattern>/spark_daemon/ledger.py", line 122, in scan
+  File "<pattern>/spark_daemon/ledger.py", line 91, in verify_line
+  File "<pattern>/spark_daemon/canonical.py", line 87, in canonical_bytes
+  File "<pattern>/spark_daemon/canonical.py", line 80, in _jcs_key_order
+  File "<pattern>/spark_daemon/canonical.py", line 80, in <dictcomp>
+  File "<pattern>/spark_daemon/canonical.py", line 79, in _jcs_key_order
+  File "<pattern>/spark_daemon/canonical.py", line 79, in <lambda>
+UnicodeEncodeError: 'utf-16-be' codec can't encode character '\ud800' in position 0: surrogates not allowed
+
+
+----------------------------------------------------------------------
+Ran 3 tests in 1.937s
+
+FAILED (failures=2, errors=5)

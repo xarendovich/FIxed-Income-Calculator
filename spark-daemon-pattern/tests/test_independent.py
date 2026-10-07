@@ -209,3 +209,94 @@ class InterpreterMutationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CorruptionIsNeverACrashTests(Ledgers):
+    """HF-43 and HF-44, found by the contract 5 verification pass. A ledger line that is merely
+    corrupt (or tampered with) crashed a verifier instead of being reported as a break: the
+    daemon exited 1 (restarted by systemd) instead of 65, and `status` crashed instead of
+    reporting CORRUPT. HF-43 (very deep nesting) crashed both verifiers alike, so DB-22 could
+    not see it; HF-44 (a lone surrogate escaped in a key) crashed only the primary one, and a
+    differential fuzz of the two verifiers found it."""
+
+    def cases(self):
+        last = self.lines()[-1].rstrip(b"\n")
+        assert b'"payload":{' in last
+        return {
+            "deep nesting (HF-43)": b"[" * 3000 + b"]" * 3000,
+            # A whole record, envelope intact, with a lone surrogate escaped in a payload key.
+            "lone-surrogate key (HF-44)": last.replace(b'"payload":{', b'"payload":{"\\ud800":1,', 1),
+        }
+
+    def test_both_verifiers_report_a_break_and_agree(self):
+        good = self.lines()
+        for name, line in self.cases().items():
+            with self.subTest(name):
+                path = self.write(good + [line + b"\n"], "bad.jsonl")
+                self.assertEqual(status.cross_check(path, self.name, self.max_bytes), [])
+                with self.assertRaises(ledger.LedgerCorrupt):
+                    ledger.verify_file(path, self.name, self.max_bytes)
+                facts = status.load_verifier().verify(path, self.name, self.max_bytes)
+                self.assertFalse(facts["intact"])
+                self.assertEqual(facts["break"]["seq"], len(good) + 1)
+
+    def test_the_daemon_refuses_with_65_and_status_says_corrupt(self):
+        good = b"".join(self.lines())
+        for name, line in self.cases().items():
+            with self.subTest(name):
+                with open(self.sb.ledger_path, "wb") as fh:
+                    fh.write(good + line + b"\n")
+                p = self.sb.run(cycles=1)
+                self.assertEqual(p.returncode, 65, p.stderr)
+                self.assertNotIn("Traceback", p.stderr)
+                with open(self.sb.ledger_path, "rb") as fh:
+                    self.assertEqual(fh.read(), good + line + b"\n")          # nothing changed
+                s = self.sb.cli("status", "--json", "--manifest", self.sb.manifest)
+                self.assertEqual(json.loads(s.stdout)["integrity"], "CORRUPT", s.stderr)
+                v = self.sb.cli("status", "--verify-only", "--manifest", self.sb.manifest)
+                self.assertEqual(v.returncode, 1)
+                self.assertTrue(v.stdout.strip().endswith("RESULT: FAIL"), v.stderr)
+
+
+class DifferentialFuzzTests(Ledgers):
+    """The two verifiers on seeded random mutations of a real ledger: same outcome every time,
+    and never a crash. A 20,000-mutation run of the same generator found HF-44."""
+
+    TOKENS = [b"true", b"1", b"-0", b"1.0", b"1e2", b"\\ud800", b"\\u0000", b"\r", b" ", b"\xef\xbb\xbf",
+              b"\x80", b'"', b"\\", b"{", b"}", b"[", b"]", b",", b":", b"null", b"9007199254740993",
+              b"\\u2028", b"\n", b"[" * 1500, b'{"\\udc00":0}']
+
+    def test_seeded_mutations_agree(self):
+        import random
+        good = b"".join(self.lines())
+        rng = random.Random(20261007)
+        path = os.path.join(self.sb.tmp, "fuzz.jsonl")
+        for i in range(1500):
+            data = bytearray(good)
+            for _ in range(rng.choice((1, 1, 2, 3))):
+                op, at = rng.randrange(5), rng.randrange(len(data) + 1)
+                if op == 0 and data:
+                    data[min(at, len(data) - 1)] = rng.randrange(256)
+                elif op == 1:
+                    data[at:at] = rng.choice(self.TOKENS)
+                elif op == 2 and data:
+                    del data[at:at + rng.randrange(1, 4)]
+                elif op == 3:
+                    data = data[:at]
+                else:
+                    lines = bytes(data).split(b"\n")
+                    j = rng.randrange(len(lines))
+                    lines.insert(j, lines[j])
+                    data = bytearray(b"\n".join(lines))
+            with open(path, "wb") as fh:
+                fh.write(data)
+            with self.subTest(mutation=i):
+                a = status.primary_outcome(path, self.name, self.max_bytes)
+                b = status.independent_outcome(path, self.name, self.max_bytes)
+                self.assertEqual(a, b)
+                if a.get("intact") and a.get("head_seq"):
+                    # What the chain guarantees: every record before the head is the original. The
+                    # head itself can be altered undetectably (no later record links to it); see
+                    # the residual on anchoring the head (HARDENING.md, residual risk 5).
+                    k = a["head_seq"]
+                    self.assertEqual(bytes(data).split(b"\n")[:k - 1], good.split(b"\n")[:k - 1])

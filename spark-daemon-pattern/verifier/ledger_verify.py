@@ -103,8 +103,11 @@ def _parse(body: bytes):
     def refuse(_text):
         raise ValueError("float or constant")
 
-    return json.loads(body.decode("utf-8"), object_pairs_hook=pairs, parse_float=refuse,
-                      parse_constant=refuse)
+    try:
+        return json.loads(body.decode("utf-8"), object_pairs_hook=pairs, parse_float=refuse,
+                          parse_constant=refuse)
+    except RecursionError:
+        raise ValueError("nesting too deep to parse") from None     # a break, never a crash
 
 
 # ---------------------------------------------------------------- the chain

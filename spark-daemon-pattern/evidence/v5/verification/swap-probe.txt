@@ -1,0 +1,2 @@
+exit 78 | observed: ['public', 'public', 'public', 'public', 'public', 'public', 'public', 'public', 'public'] | errors: [{'category': 'POLICY_VIOLATION', 'exception_type': 'NotAllowed'}]
+SECRET read: False
