@@ -1,0 +1,17 @@
+16b8db9 spark-daemon: fix HF-42, a long --workdir crashed DB-11
+Ran 261 tests in 162.084s
+
+OK
+skipped: 0
+dir-watch exit=0 RESULT: PASS 21 PASS
+disk-watch exit=0 RESULT: PASS 21 PASS
+meminfo-watch exit=0 RESULT: PASS 21 PASS
+unit --report exit=0
+contract up to date
+{
+  "contract_version": "5.0.0",
+  "contract_sha256": "2d080b407b6c82b230563670746f4a615b2c96660ec68f4509574562c282001d"
+}
+dirty files: 0
+
+[exited with code 0]
