@@ -1,0 +1,11 @@
+DB-11  FAIL       notify protocol                                                          check crashed: OSError: AF_UNIX path too long
+DB-11: check crashed: OSError: AF_UNIX path too long
+--- the regression test before the fix:
+  File "/home/user/FIxed-Income-Calculator/spark-daemon-pattern/spark_daemon/battery.py", line 415, in db11
+    sock.bind(sock_path)
+OSError: AF_UNIX path too long
+
+----------------------------------------------------------------------
+Ran 1 test in 0.740s
+
+FAILED (errors=1)

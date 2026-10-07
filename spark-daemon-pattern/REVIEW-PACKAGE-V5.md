@@ -15,7 +15,7 @@
 | Report schemas | validate/2, precheck/2, battery/2, qualification/1 | **one**, `spark-daemon-report/1`, facts only |
 | Ways a daemon starts | `run` (+ ambient test mode, unqualified starts, tolerance of missing Landlock) | `run`; `harness` with explicit, recorded parameters. Both need the digests and Landlock |
 | Programs a daemon may run | an allowlist, with loader residual | **none**; execute granted nowhere |
-| Self-tests | 267 of 267 | **260 of 260**, none skipped; every change explained by ID (`evidence/v5/cut1-accounting.md` to `cut5-accounting.md`) |
+| Self-tests | 267 of 267 | **261 of 261**, none skipped; every change explained by ID (`evidence/v5/cut1-accounting.md` to `cut5-accounting.md`) |
 | Battery | 4 × 22 (21 PASS, DB-24 N/A) | **3 × 22** (21 PASS, DB-24 N/A); `git-watch` retired with R-2 |
 
 ## 2. The six boundaries left
@@ -48,6 +48,7 @@ The owner's eighth invariant ("nothing relaxes …") is the preamble. `tests/tes
 
 - **HF-41 (Medium), fixed in cut 2.** The unit `battery --emit-unit` wrote named the battery's disposable workspace as the daemon's home, in `Environment=SPARK_DAEMON_HOME=` and `ReadWritePaths=`, and expanded every `~` path there. It was generated after the workspace had changed the battery process's environment. It is visible in the committed r4.11 sample. Reproduction and fix: `evidence/v5/hf41_*`. The pilot was never exposed (it runs 3.1.0, which has no `--emit-unit`). The root cause, an ambient environment change, is gone with cut 3.
 - **A blind spot in a first agreement test, cut 4.** Because the no-gaps rule keeps reads clear of denied paths, a Python `denied()` that allowed everything would have passed a check made only through `may_read` and `may_write`. The audit hook relies on `denied()` directly, so the agreement now checks it. No shipped code had the defect.
+- **HF-42 (Low), found by the clean-checkout rerun.** DB-11 bound its notify socket inside the workspace, so a long `--workdir` pushed the path past AF_UNIX's 108 bytes, crashed the check and failed the battery for a daemon with nothing wrong. Present since r3; it never showed because every earlier run used a short workdir. Fixed, with a regression test (`evidence/v5/hf42_before.txt`). The final rerun from a clean checkout is in `evidence/v5/clean-checkout/`.
 - **A correction to r4.11's E-8 table.** Owner invariant 6 (the cycle budget) belongs to I-6, not I-3.
 
 ## 5. Stop conditions: none triggered

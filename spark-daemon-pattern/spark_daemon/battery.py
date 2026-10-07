@@ -408,9 +408,16 @@ def db10(ws, c, seed):
 
 
 def db11(ws, c):
-    sock_path = os.path.join(ws.root, "notify.sock")
-    if os.path.exists(sock_path):
-        os.remove(sock_path)
+    # HF-42: the stand-in notify socket lives in a short private directory, not in the workspace:
+    # an AF_UNIX path is limited to 108 bytes, and a long --workdir crashed this check.
+    sock_dir = tempfile.mkdtemp(prefix="sdn-", dir="/tmp")
+    try:
+        _db11(ws, c, os.path.join(sock_dir, "n"))
+    finally:
+        shutil.rmtree(sock_dir, ignore_errors=True)
+
+
+def _db11(ws, c, sock_path):
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     sock.bind(sock_path)
     sock.settimeout(0.2)

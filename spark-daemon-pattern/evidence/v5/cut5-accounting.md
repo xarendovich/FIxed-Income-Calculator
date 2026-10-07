@@ -1,6 +1,6 @@
 # Cut 5: six invariants, fewer commands, R-5c deferred, contract 5.0.0. Accounting
 
-After cut 4: 255 self-tests (`tests-cut4.txt`). After cut 5: 260 (`tests-cut5.txt`). 1 ID left and 6 arrived: 255 − 1 + 6 = 260. Reproduce the list with `python3 -B evidence/v5/list_tests.py | diff evidence/v5/tests-cut4.txt -`.
+After cut 4: 255 self-tests (`tests-cut4.txt`). After cut 5: 261 (`tests-cut5.txt`). 1 ID left and 7 arrived: 255 − 1 + 7 = 261. Reproduce the list with `python3 -B evidence/v5/list_tests.py | diff evidence/v5/tests-cut4.txt -`.
 
 ## What changed
 
@@ -20,6 +20,7 @@ After cut 4: 255 self-tests (`tests-cut4.txt`). After cut 5: 260 (`tests-cut5.tx
 | `test_hardening.CliRobustnessTests.test_verify_with_a_bad_manifest_reports_instead_of_crashing` | `test_hardening.CliRobustnessTests.test_verify_only_with_a_bad_manifest_reports_instead_of_crashing` | Same behaviour, new command |
 | (none) | `test_hardening.CliRobustnessTests.test_verify_only_prints_what_verify_printed`, `test_moved_commands_say_where_they_went` | |
 | (none) | `test_invariants.InvariantTests.*` (3) | |
+| (none) | `test_misc.BatteryWorkdirTests.test_a_long_workdir_does_not_crash_the_notify_check` | HF-42, found by the clean-checkout rerun |
 
 ## Changed in place
 

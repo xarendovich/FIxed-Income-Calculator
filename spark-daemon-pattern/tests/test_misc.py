@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import unicodedata
@@ -202,3 +203,22 @@ class SourceHygieneTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BatteryWorkdirTests(unittest.TestCase):
+    def test_a_long_workdir_does_not_crash_the_notify_check(self):
+        """HF-42: DB-11 bound its stand-in notify socket inside the workspace, so a --workdir whose
+        path ran past AF_UNIX's 108 bytes crashed the check (found by the contract 5 clean-checkout
+        rerun, whose scratch path is long). The verdict must not depend on where the workspace is."""
+        import tempfile
+        from spark_daemon import battery, judge
+        tmp = tempfile.mkdtemp(prefix="hf42-")
+        try:
+            workdir = os.path.join(tmp, "w" * 100)
+            j = judge.run("validate", os.path.join(EXAMPLE, "manifest.json"), workdir=workdir)
+            self.assertEqual(j.result, "PASS", [(c.id, c.state, c.evidence) for c in j.checks])
+            c = judge.Check("DB-11", "notify protocol")
+            battery.db11(j.ws, c)
+            self.assertEqual(c.state, "PASS", c.evidence)
+        finally:
+            shutil.rmtree(tmp)
