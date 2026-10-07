@@ -11,6 +11,7 @@ import os
 import re
 
 from . import EXIT_ALREADY_RUNNING, EXIT_LEDGER_CORRUPT, EXIT_POLICY, EXIT_USAGE, VERSION
+from .pathpolicy import PathPolicy, unit_paths
 from .paths import expand, home
 
 # The three Landlock syscalls sit in systemd's @sandbox group, which @system-service does
@@ -105,10 +106,11 @@ def generate(m, *, root: str, python: str = "/usr/bin/python3", require_paths=()
     files still match. Without it, it is a preview, which the runtime refuses to start.
     Installable units come only from `unit --report` (contract 5, E-11)."""
     base = home() if daemon_home is None else os.path.realpath(daemon_home)
-    out = _unit_path("output_dir", expand(m.output_dir, base))
-    reads = [_unit_path("read path", expand(p, base)) for p in m.reads]
-    ro = [p for p in reads if not (p.startswith("/proc/") or p.startswith("/sys/"))]
-    deny = [_unit_path("denied path", expand(p, base)) for p in m.all_deny]
+    # The unit projection of the one path policy (pathpolicy.unit_paths, contract 5).
+    paths = unit_paths(PathPolicy.of(m, home=base))
+    out = _unit_path("output_dir", paths["ReadWritePaths"][0])
+    ro = [_unit_path("read path", p) for p in paths["ReadOnlyPaths"]]
+    deny = [_unit_path("denied path", p) for p in paths["InaccessiblePaths"]]
     manifest_path = _unit_path("manifest path", os.path.abspath(m.path))
     entry = _unit_path("pattern root", os.path.join(os.path.abspath(root), "bin", "spark-daemon"))
     python = _unit_path("python", python)

@@ -18,7 +18,7 @@ import stat
 import sys
 
 from . import KNOWN_OUTPUT_ENTRIES, QUARANTINE_DIR, TMP_DIR, TMP_PREFIX
-from .paths import expand, within
+from .pathpolicy import PathPolicy
 
 
 class GuardError(Exception):
@@ -51,28 +51,23 @@ _PATH_MUTATIONS = frozenset({
 
 
 class Policy:
-    """What one daemon may read, write and run, derived from its manifest.
+    """What one daemon may read and write (pathpolicy.PathPolicy, the one canonical path
+    policy, contract 5), plus where it may send notifications.
 
     Immutable once built: the audit hook and ctx both consult it, so a daemon that reached
     it (purity.py forbids private attributes, which is the only route) still could not widen
     its own bounds. The hook additionally captures its own copies at install time."""
 
-    __slots__ = ("output_dir", "reads", "deny", "notify_target")
+    __slots__ = ("paths", "notify_target")
 
     def __init__(self, manifest, notify_socket=None, output_dir=None, home=None):
         # output_dir: the harness's recorded override for a manifest whose output_dir is
         # absolute (contract 5); validated by the caller against the manifest's placement rules.
         # home: what "~" expands to when not this process's home() (the battery, for its
         # workspace, without changing its own environment).
-        values = {
-            "output_dir": expand(output_dir if output_dir is not None else manifest.output_dir, home),
-            "reads": tuple(expand(p, home) for p in manifest.reads),
-            "deny": tuple(expand(p, home) for p in manifest.all_deny),
-            "notify_target": _notify_target(notify_socket if notify_socket is not None
-                                            else os.environ.get("NOTIFY_SOCKET")),
-        }
-        for key, value in values.items():
-            object.__setattr__(self, key, value)
+        object.__setattr__(self, "paths", PathPolicy.of(manifest, home=home, output_dir=output_dir))
+        object.__setattr__(self, "notify_target", _notify_target(
+            notify_socket if notify_socket is not None else os.environ.get("NOTIFY_SOCKET")))
 
     def __setattr__(self, name, value):
         raise AttributeError("Policy is immutable")
@@ -80,8 +75,12 @@ class Policy:
     def __delattr__(self, name):
         raise AttributeError("Policy is immutable")
 
+    output_dir = property(lambda self: self.paths.output_dir)
+    reads = property(lambda self: self.paths.reads)
+    deny = property(lambda self: self.paths.deny)
+
     def denied(self, full: str) -> bool:
-        return any(within(full, d) for d in self.deny)
+        return self.paths.denied(full)
 
     def readable(self, path: str, follow: bool = True) -> str:
         """Resolve a path the daemon asked to read, or raise GuardError. follow=False resolves
@@ -90,19 +89,19 @@ class Policy:
         it points, so a link planted in a watched folder cannot trip fail-closed (78)."""
         name = os.path.basename(path)
         if not follow and name not in ("", ".", "..", "~"):
-            full = os.path.join(expand(os.path.dirname(path) or "."), name)
+            full = os.path.join(self.paths.resolve(os.path.dirname(path) or "."), name)
         else:
-            full = expand(path)
-        if self.denied(full):
+            full = self.paths.resolve(path)
+        if self.paths.denied(full):
             _count("read-denied-path")
             raise GuardError("path is denied")
-        if not any(within(full, r) for r in self.reads):
+        if not self.paths.may_read(full):
             _count("read-outside-manifest")
             raise GuardError("path is outside the manifest's reads")
         return full
 
     def writable(self, full: str) -> bool:
-        return within(full, self.output_dir) and not self.denied(full)
+        return self.paths.may_write(full)
 
 
 def _notify_target(address):
@@ -114,12 +113,6 @@ def _notify_target(address):
 def _count(kind):
     VIOLATIONS["count"] += 1
     VIOLATIONS["last"] = kind
-
-
-def count_violation(kind: str) -> None:
-    """Record a violation detected outside the audit hook (for example a ctx request for a
-    command the manifest does not name). The runtime fails closed on it after the cycle."""
-    _count(kind)
 
 
 def prepare_output_dir(path: str) -> None:
@@ -176,14 +169,8 @@ def install_audit_hook(policy: Policy, mode: str = "enforce") -> None:
     if mode not in ("enforce", "record"):
         raise ValueError("mode must be 'enforce' or 'record'")
     notify = policy.notify_target
-    deny = tuple(policy.deny)
-    output_dir = policy.output_dir
-
-    def denied(full):
-        return any(within(full, d) for d in deny)
-
-    def writable(full):
-        return within(full, output_dir) and not denied(full)
+    paths = policy.paths            # frozen; the hook keeps its own reference
+    denied, writable = paths.denied, paths.may_write
 
     def violation(kind, detail=""):
         _count(kind)

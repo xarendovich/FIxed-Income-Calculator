@@ -34,7 +34,7 @@ Landlock too, and DB-17's probe reports N/A on one without it.
 import ctypes
 import os
 
-from .paths import within
+from . import pathpolicy
 
 # landlock_create_ruleset / landlock_add_rule / landlock_restrict_self. Generic syscall table
 # numbers: the same on x86_64 and aarch64 (the DGX Spark), unlike some older architectures'
@@ -189,11 +189,9 @@ def restrict_self(rules, *, scope_signals: bool = True) -> int:
 
 
 def gaps(policy) -> list:
-    """Denied paths (guard.Policy.deny, which is BASE_DENY plus the manifest's own deny
-    list) that sit inside a granted read. Landlock cannot close these on its own; the audit
-    hook and the systemd unit's InaccessiblePaths do. Recorded in DAEMON_START so a gap is
-    always visible, never assumed away."""
-    return sorted({denied for denied in policy.deny for read in policy.reads if within(denied, read)})
+    """Denied paths that sit inside a granted read (pathpolicy.gaps). Landlock cannot close
+    these on its own. Recorded in DAEMON_START so a gap is always visible, never assumed away."""
+    return pathpolicy.gaps(policy)
 
 
 def apply_supervisor_domain(policy, *, extra_read_paths=()) -> dict:
@@ -216,15 +214,11 @@ def apply_supervisor_domain(policy, *, extra_read_paths=()) -> dict:
         raise LandlockError(
             f"Landlock ABI {abi} unavailable or below the minimum usable ABI {MIN_USABLE_ABI}; PD-15 requires it")
 
-    rules = []
-    for path in extra_read_paths:
-        if os.path.exists(path):
-            rules.append((path, READ_NO_EXEC))
-    for path in policy.reads:
-        if os.path.exists(path):
-            rules.append((path, READ_NO_EXEC))
-    if os.path.isdir(policy.output_dir):
-        rules.append((policy.output_dir, ALL_FS_ACCESS & ~ACCESS_FS_EXECUTE))
+    # The kernel projection of the one path policy (pathpolicy.grants, contract 5): only the
+    # access masks and the existence checks are Landlock's own.
+    access = {pathpolicy.READ: READ_NO_EXEC, pathpolicy.WRITE: ALL_FS_ACCESS & ~ACCESS_FS_EXECUTE}
+    rules = [(path, access[kind]) for path, kind in pathpolicy.grants(policy, extra_read_paths)
+             if (os.path.isdir(path) if kind == pathpolicy.WRITE else os.path.exists(path))]
     used_abi = restrict_self(rules, scope_signals=True)
     return {"abi": used_abi, "status": "enforced", "gaps": gaps(policy)}
 
