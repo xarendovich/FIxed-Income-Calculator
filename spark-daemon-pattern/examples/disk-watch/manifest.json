@@ -1,12 +1,11 @@
 {
-  "manifest_schema": "spark-daemon-manifest/3",
+  "manifest_schema": "spark-daemon-manifest/4",
   "name": "disk-watch",
   "version": "0.1.0",
   "purpose": "Records when free space on the model-weights filesystem moves between headroom bands.",
   "daemon_class": "observe",
   "trigger": {"kind": "poll", "interval_seconds": 300},
   "reads": ["~/models"],
-  "commands": [],
   "output_dir": "~/spark-daemons/disk-watch",
   "network": {"mode": "none"},
   "run_as": {"unit": "system", "user": "spark-diskwatch"},

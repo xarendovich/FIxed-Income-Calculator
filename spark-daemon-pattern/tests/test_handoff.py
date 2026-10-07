@@ -12,7 +12,7 @@ import tempfile
 import unittest
 
 from helpers import ENTRY, FIXTURES, ROOT, Sandbox
-from spark_daemon import contract, handoff, manifest, proc, scaffold
+from spark_daemon import SYSTEM_PATH, contract, handoff, manifest, scaffold
 
 CONTRACT_DIR = os.path.join(ROOT, "contract")
 EXAMPLES = os.path.join(ROOT, "examples")
@@ -26,7 +26,7 @@ except ImportError:          # optional: CI installs it; the stdlib-only runtime
 
 def cli(*args, timeout=120):
     return subprocess.run([sys.executable, "-I", "-B", ENTRY, *args], capture_output=True, text=True,
-                          timeout=timeout, env={"PATH": proc.SYSTEM_PATH, "HOME": "/nonexistent", "LANG": "C.UTF-8"})
+                          timeout=timeout, env={"PATH": SYSTEM_PATH, "HOME": "/nonexistent", "LANG": "C.UTF-8"})
 
 
 def load_json(path):
@@ -49,6 +49,14 @@ class PublishedContractTests(unittest.TestCase):
         versions = {k: v for k, v in load_json(os.path.join(CONTRACT_DIR, "versions.json")).items()
                     if not k.startswith("_")}
         identity = contract.contract_identity()
+        self.assertEqual(len(set(versions.values())), len(versions), "two versions share one contract")
+        if identity["contract_version"].endswith("-dev"):
+            # A development version between published contracts (ADJUDICATION-V5.md §3): never
+            # recorded, and never equal to a published contract.
+            self.assertNotIn(identity["contract_version"], versions)
+            self.assertNotIn(identity["contract_sha256"], versions.values(),
+                             "the rules are those of a published contract: drop -dev")
+            return
         self.assertIn(identity["contract_version"], versions,
                       "CONTRACT_VERSION is not recorded in contract/versions.json")
         self.assertEqual(versions[identity["contract_version"]], identity["contract_sha256"],
@@ -62,7 +70,7 @@ class PublishedContractTests(unittest.TestCase):
             if not exe:
                 continue
             p = subprocess.run([exe, "-I", "-B", ENTRY, "describe", "--identity"], capture_output=True, text=True,
-                               timeout=60, env={"PATH": proc.SYSTEM_PATH, "HOME": "/nonexistent"})
+                               timeout=60, env={"PATH": SYSTEM_PATH, "HOME": "/nonexistent"})
             if p.returncode == 0:
                 seen[version] = json.loads(p.stdout)["contract_sha256"]
         if len(seen) < 2:
@@ -72,8 +80,7 @@ class PublishedContractTests(unittest.TestCase):
     def test_contract_names_every_ctx_method_and_battery_check(self):
         body = contract.describe()["contract"]
         names = {m["name"] for m in body["ctx"]["methods"]}
-        self.assertEqual(names, {"read_text", "list_dir", "stat", "disk_usage", "run", "git", "now_utc",
-                                 "unsettled"})
+        self.assertEqual(names, {"read_text", "list_dir", "stat", "disk_usage", "now_utc", "unsettled"})
         from spark_daemon import judge
         self.assertEqual(body["evidence"]["profiles"]["battery"]["checks"], judge.profile_ids("battery"))
         self.assertEqual(sorted(body["evidence"]["checks"]), sorted(judge.registry()))
@@ -134,9 +141,7 @@ class SchemaAgreementTests(unittest.TestCase):
             "dot-dot read": lambda d: d.update(reads=["/proc/../etc/shadow"]),
             "trailing slash": lambda d: d.update(reads=["/proc/meminfo/"]),
             "relative read": lambda d: d.update(reads=["proc/meminfo"]),
-            "shell command": lambda d: d.update(commands=["bash"]),
-            "versioned interpreter": lambda d: d.update(commands=["python3.12"]),
-            "duplicate command": lambda d: d.update(commands=["git", "git"]),
+            "commands (removed in 5.0.0)": lambda d: d.update(commands=[]),
             "named network": lambda d: d["network"].update(mode="named"),
             "root user": lambda d: d["run_as"].update(user="root"),
             "user unit with user": lambda d: d.update(run_as={"unit": "user", "user": "x"}),
@@ -269,7 +274,7 @@ class ValidateJsonTests(unittest.TestCase):
             shutil.copy(os.path.join(EXAMPLES, "meminfo-watch", "daemon.py"), tmp)
             r, _ = handoff.validate_report(os.path.join(tmp, "manifest.json"))
             wheres = {d["where"] for d in r["diagnostics"]}
-            self.assertEqual(wheres, {"trigger.interval_seconds", "commands[0]"})
+            self.assertEqual(wheres, {"trigger.interval_seconds", "commands"})
             self.assertTrue(all(d["layer"] == "manifest" for d in r["diagnostics"]))
         finally:
             shutil.rmtree(tmp)

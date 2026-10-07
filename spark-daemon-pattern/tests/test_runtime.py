@@ -159,6 +159,8 @@ class RuntimeTests(unittest.TestCase):
     def test_watchdog_pings_stop_while_an_observation_hangs(self):
         """No background pinger: a blocked sense() starves the watchdog, so systemd would restart it."""
         b = self.box("hang")
+        os.makedirs(os.path.join(b.home, "data"), exist_ok=True)
+        os.mkfifo(os.path.join(b.home, "data", "fifo"))     # open() blocks: no writer, ever
         sock_path = os.path.join(b.tmp, "notify.sock")
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         sock.bind(sock_path)
@@ -174,7 +176,8 @@ class RuntimeTests(unittest.TestCase):
 
         t = threading.Thread(target=collect)
         t.start()
-        p = b.run(cycles=2, NOTIFY_SOCKET=sock_path)
+        # The cycle's alarm ends each 3-second hang (contract 5: the block is a read, not a program).
+        p = b.run(cycles=2, NOTIFY_SOCKET=sock_path, SPARK_DAEMON_TEST_CYCLE_BUDGET_MS="3000")
         done.set()
         t.join()
         sock.close()

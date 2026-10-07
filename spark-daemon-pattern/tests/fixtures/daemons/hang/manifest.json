@@ -1,5 +1,5 @@
 {
-  "manifest_schema": "spark-daemon-manifest/3",
+  "manifest_schema": "spark-daemon-manifest/4",
   "version": "0.1.0",
   "purpose": "Test fixture daemon for the skeleton self-tests.",
   "daemon_class": "observe",
@@ -9,9 +9,6 @@
   },
   "reads": [
     "~/data"
-  ],
-  "commands": [
-    "sleep"
   ],
   "network": {
     "mode": "none"

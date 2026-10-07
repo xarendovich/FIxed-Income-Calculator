@@ -4,6 +4,7 @@ the rest of the process's life, so every enforcing test isolates itself with os.
 the same discipline evidence/ap/landlock_probe.py uses)."""
 
 import errno
+import glob
 import json
 import os
 import shutil
@@ -12,9 +13,9 @@ import unittest
 from collections import namedtuple
 
 from helpers import ROOT  # noqa: F401  (puts the package on sys.path)
-from spark_daemon import landlock, proc
+from spark_daemon import SYSTEM_PATH, landlock
 
-FakePolicy = namedtuple("FakePolicy", ["output_dir", "reads", "deny", "commands"], defaults=({},))
+FakePolicy = namedtuple("FakePolicy", ["output_dir", "reads", "deny"])
 
 
 def _run_in_child(fn):
@@ -56,9 +57,10 @@ def _exec(path, *args):
     """Fork and exec path; the exit code, or 100 + errno if exec itself was refused."""
     pid = os.fork()
     if pid == 0:
-        devnull = os.open(os.devnull, os.O_WRONLY)
-        os.dup2(devnull, 1)
-        os.dup2(devnull, 2)
+        # Since contract 5 the domain grants no write on /dev/null (it served only commands), so
+        # the child's output is closed instead.
+        os.close(1)
+        os.close(2)
         try:
             os.execv(path, [path, *args])
         except OSError as e:
@@ -133,7 +135,7 @@ class SupervisorDomainTestModeTests(unittest.TestCase):
             result = landlock.apply_supervisor_domain(policy, test_mode=True)
         finally:
             landlock.abi_version = original
-        self.assertEqual(result, {"abi": 0, "status": "unavailable", "gaps": [], "execute": []})
+        self.assertEqual(result, {"abi": 0, "status": "unavailable", "gaps": []})
 
     def test_unavailable_landlock_refuses_outside_test_mode(self):
         original = landlock.abi_version
@@ -211,9 +213,10 @@ class EnforcementTests(unittest.TestCase):
         """r4.6 (HF-36): the domain granted EXECUTE on the output directory and on every declared
         read path, so if the in-process layers were bypassed, a binary written into the output
         directory, or dropped by someone else into a watched folder, could be run. r4.11 (R-2b):
-        a daemon that declares no command may execute nothing at all, system tools included."""
+        a daemon that declares no command may execute nothing at all, system tools included.
+        Since contract 5 (R-2) no daemon declares a command: the domain grants execute nowhere."""
         home = self.home
-        true_bin = shutil.which("true", path=proc.SYSTEM_PATH)
+        true_bin = shutil.which("true", path=SYSTEM_PATH)
         dropped = os.path.join(home, "reads", "dropped")
         shutil.copyfile(true_bin, dropped)
         os.chmod(dropped, 0o755)
@@ -229,34 +232,12 @@ class EnforcementTests(unittest.TestCase):
             shutil.copyfile(true_bin, written)          # writing into the output dir is allowed
             os.chmod(written, 0o755)
             return {"system": _exec(true_bin), "output_dir": _exec(written), "declared_read": _exec(dropped),
-                    "granted": info["execute"]}
+                    "keys": sorted(info)}
 
         result = _run_in_child(child)
-        self.assertEqual(result["granted"], [])
+        self.assertEqual(result["keys"], ["abi", "gaps", "status"])
         for where in ("system", "output_dir", "declared_read"):
             self.assertEqual(result[where], 100 + errno.EACCES, (where, result))
-
-    def test_a_declared_command_runs_and_nothing_else_does(self):
-        """r4.11 (R-2b): execute only on the declared executable and its ELF loader. A declared
-        command is an allowlist, not a switch that lets the daemon run any program."""
-        git = shutil.which("git", path=proc.SYSTEM_PATH)
-        if not git:
-            self.skipTest("git not installed")
-        git = os.path.realpath(git)
-        true_bin = shutil.which("true", path=proc.SYSTEM_PATH)
-        home = self.home
-
-        def child():
-            policy = FakePolicy(output_dir=os.path.join(home, "out"), reads=(os.path.join(home, "reads"),),
-                                deny=(), commands={"git": git})
-            info = landlock.apply_supervisor_domain(
-                policy, extra_read_paths=landlock.system_read_paths(), test_mode=False)
-            return {"git": _exec(git, "--version"), "true": _exec(true_bin), "granted": info["execute"]}
-
-        result = _run_in_child(child)
-        self.assertEqual(result["git"], 0, result)
-        self.assertEqual(result["true"], 100 + errno.EACCES, result)
-        self.assertEqual(result["granted"], sorted({git, landlock.elf_interpreter(git)}))
 
     def test_native_modules_still_import_without_any_execute_right(self):
         home = self.home
@@ -272,29 +253,27 @@ class EnforcementTests(unittest.TestCase):
 
         self.assertEqual(_run_in_child(child), "ok")
 
-    def test_the_loader_residual_is_recorded_not_hidden(self):
-        """The known residual of R-2b (evidence/r4.11/exec_grant_probe.txt): with execute on a
-        declared command and its loader, the loader itself can be run as a program on another
-        readable binary. Python-level code cannot reach it (proc and the audit hook allow only the
-        declared executable); closing it at the kernel needs PD-72 or R-2. If this test starts
-        failing, the residual is gone: update ADJUDICATION-R4.9-OWNER-IMPLEMENTATION.md."""
-        git = shutil.which("git", path=proc.SYSTEM_PATH)
-        if not git:
-            self.skipTest("git not installed")
-        git = os.path.realpath(git)
-        loader = landlock.elf_interpreter(git)
-        true_bin = shutil.which("true", path=proc.SYSTEM_PATH)
+    def test_the_loader_residual_is_closed(self):
+        """r4.11 recorded a residual of R-2b (evidence/r4.11/exec_grant_probe.txt): with execute on
+        a declared command and its ELF loader, the loader itself could run another readable
+        binary. Contract 5 (R-2) grants execute nowhere, so the loader is refused like any other
+        program. Replaces test_the_loader_residual_is_recorded_not_hidden."""
+        loaders = sorted({os.path.realpath(p) for p in glob.glob("/lib*/ld-linux*.so*") + glob.glob("/lib/ld-musl*")
+                          if os.path.isfile(p)})
+        if not loaders:
+            self.skipTest("no ELF loader found")
+        true_bin = shutil.which("true", path=SYSTEM_PATH)
         home = self.home
 
         def child():
-            policy = FakePolicy(output_dir=os.path.join(home, "out"), reads=(), deny=(), commands={"git": git})
+            policy = FakePolicy(output_dir=os.path.join(home, "out"), reads=(), deny=())
             landlock.apply_supervisor_domain(policy, extra_read_paths=landlock.system_read_paths(),
                                              test_mode=False)
-            return {"direct": _exec(true_bin), "via_loader": _exec(loader, true_bin)}
+            return {"direct": _exec(true_bin), "via_loader": [_exec(loader, true_bin) for loader in loaders]}
 
         result = _run_in_child(child)
         self.assertEqual(result["direct"], 100 + errno.EACCES, result)
-        self.assertEqual(result["via_loader"], 0, result)
+        self.assertEqual(result["via_loader"], [100 + errno.EACCES] * len(loaders), result)
 
     def test_output_directory_gets_every_right_the_abi_handles(self):
         home = self.home

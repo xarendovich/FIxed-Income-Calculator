@@ -32,7 +32,8 @@ ENVELOPE_MAX_BYTES = 16384
 SUBJECT_NAMES = ("daemon.py", "manifest.json")
 PRODUCER_KINDS = ("human", "script", "model")
 _HEX64 = re.compile(r"[0-9a-f]{64}")
-_SEMVER = re.compile(r"(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})")
+# x.y.z, or x.y.z-dev for a development contract between published ones (ADJUDICATION-V5.md §3).
+_SEMVER = re.compile(r"(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})(-dev)?")
 _PRODUCER_ID = re.compile(r"[A-Za-z0-9 ._:/@+()-]{1,120}")
 
 
@@ -110,7 +111,7 @@ def check_envelope(envelope_path: str, directory: str):
     if not (isinstance(rc, dict) and set(rc) == {"contract_version", "contract_sha256"}
             and isinstance(rc["contract_version"], str) and _SEMVER.fullmatch(rc["contract_version"])
             and isinstance(rc["contract_sha256"], str) and _HEX64.fullmatch(rc["contract_sha256"])):
-        fail("required_contract", "must be {contract_version: x.y.z, contract_sha256: 64 hex}")
+        fail("required_contract", "must be {contract_version: x.y.z[-dev], contract_sha256: 64 hex}")
     elif rc == running:
         match = "exact"
     elif rc["contract_version"].split(".")[0] != running["contract_version"].split(".")[0]:

@@ -10,7 +10,10 @@ unit generator only prints text for a human to review.
 
 VERSION = "0.3.0"
 
-MANIFEST_SCHEMA = "spark-daemon-manifest/3"
+MANIFEST_SCHEMA = "spark-daemon-manifest/4"
+# The PATH given to the tools the battery runs (strace, systemd-analyze). Since v5 (R-2) the
+# daemon itself runs no program at all.
+SYSTEM_PATH = "/usr/bin:/bin"
 LEDGER_SCHEMA = "spark-daemon-ledger/1"
 BATTERY_SCHEMA = "spark-daemon-battery/2"
 

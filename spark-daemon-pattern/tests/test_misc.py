@@ -9,7 +9,7 @@ import unicodedata
 import unittest
 
 from helpers import EXAMPLE, ENTRY, FIXTURES, ROOT
-from spark_daemon import manifest, proc, purity, unitgen
+from spark_daemon import SYSTEM_PATH, manifest, purity, unitgen
 
 
 class UnitgenTests(unittest.TestCase):
@@ -131,7 +131,7 @@ class BatteryTests(unittest.TestCase):
     def run_battery(self, manifest_path):
         return subprocess.run([sys.executable, "-I", "-B", ENTRY, "battery", "--manifest", manifest_path,
                                "--quick"], capture_output=True, text=True, timeout=300,
-                              env={"PATH": proc.SYSTEM_PATH, "HOME": "/nonexistent", "LANG": "C.UTF-8"})
+                              env={"PATH": SYSTEM_PATH, "HOME": "/nonexistent", "LANG": "C.UTF-8"})
 
     def test_example_passes_or_is_incomplete_never_fails(self):
         p = self.run_battery(os.path.join(EXAMPLE, "manifest.json"))

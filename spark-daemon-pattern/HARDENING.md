@@ -59,11 +59,27 @@ Severity: **Critical** = daemon code executes or reads outside its manifest; **H
 | HF-40 | Low | Found in r4.11 while preparing the design review: two mechanisms enforce the cycle budget (R-6), the command's own timeout in `proc.run` and the cycle's alarm, and they meet at the same deadline. A command that closed its stdout and kept running sent `proc.run` into its cleanup wait; an alarm raised during that wait left the cleanup before the process group was killed, so the command outlived the cycle, one per cycle, until `TasksMax` (`evidence/r4.11/alarm_child_leak_before.txt`). The cleanup now kills a still-running group on every exit path (`alarm_child_leak_after.txt`). `tests/test_proc.py::test_an_exception_mid_wait_still_kills_the_group` (fails without the fix). |
 | HF-23 | Info | `README.md` r2 lists `evidence/ap/` (the Landlock and JCS probes behind `ADJUDICATION-AP.md`). The uploaded zip does not contain it. | n/a | Not reconstructable here; the claims it backs are re-evidenced by DB-17/DB-18 and the JCS tests | Please re-attach if available |
 
+**Retired with contract 5 (R-2, r4.12; `ADJUDICATION-V5.md`).** A daemon runs no program, so `ctx.run`, `ctx.git`, `proc.py`, the manifest's `commands` and every execute grant are gone. The findings below stay as history; their fixes and tests left with the code they hardened, and their defect class can no longer occur in the generic core:
+
+| Finding | What happened to its test |
+| --- | --- |
+| HF-01, HF-02 (Critical, Git option injection) | `GitHardeningTests`, `GitInjectionRuntimeTests` retired |
+| HF-08 (Git ownership), HF-19 (external diff) | `test_diff_subcommands_get_no_ext_diff_and_no_textconv` retired |
+| HF-10 (undeclared command not counted) | Replaced by `test_ctx_offers_no_way_to_run_a_program` |
+| HF-11 (command denylist gaps) | `test_interpreter_families_and_command_runners_are_refused` and `test_harmless_commands_still_allowed` replaced by `test_a_commands_list_is_refused_with_its_migration` |
+| HF-18 (CPU of children) | Kept; renamed `test_cpu_includes_any_child_process`, so a regression that spawned a child would still show in DB-14 |
+| HF-24 (Critical, repository-owned `gpg.program`, forged history) | `GitHistoryIntegrityTests` retired |
+| HF-29, HF-30 (git-watch output cap; six Git calls against the watchdog) | `GitWatchUnsettledTests` and `test_git_watch_worst_case_sense_fits_its_cycle_budget` retired with `git-watch` |
+| HF-40 (a command outliving its cycle) | `tests/test_proc.py` retired with `proc.py`; the cycle's alarm is the only in-process deadline (E-2) |
+| r4.11 R-2b loader residual | `test_the_loader_residual_is_recorded_not_hidden` replaced by `test_the_loader_residual_is_closed`: with execute granted nowhere, the loader is refused like any other program |
+
+Residual risks 1 and 4 below are closed by the same cut.
+
 Housekeeping, not counted: purity now also refuses import-time calls outside a small constructor list (`re.compile`, `frozenset`, `dataclass`, ...), bare decorators, and redefining or reassigning `sense`/`decide`/`digest`. Before, "import has no side effects" was a claim; now it is enforced.
 
 ## Residual risks (known, not fixed; for adjudication)
 
-1. **Repository-owned Git config is still trusted (PD-25).** With `safe.directory` scoped to the declared repository, that repository's own `.git/config` applies. Pager, fsmonitor, external diff and textconv are neutralised, and hooks do not run for read-only commands. But a **filter driver** (`filter.<name>.clean`, selected by `.gitattributes`) can run during `git status`/`git diff` on worktree files. Landlock (read-only on the repo, write only to the output dir, no TCP) and the systemd unit contain it. Recommendation: accept for repositories the owner controls; refuse `status`/`diff` on worktrees you do not control (observe a bare mirror instead, as `git-watch`'s fixture does).
+1. **Closed in contract 5 (R-2): no daemon runs Git.** *Was:* **Repository-owned Git config is still trusted (PD-25).** With `safe.directory` scoped to the declared repository, that repository's own `.git/config` applies. Pager, fsmonitor, external diff and textconv are neutralised, and hooks do not run for read-only commands. But a **filter driver** (`filter.<name>.clean`, selected by `.gitattributes`) can run during `git status`/`git diff` on worktree files. Landlock (read-only on the repo, write only to the output dir, no TCP) and the systemd unit contain it. Recommendation: accept for repositories the owner controls; refuse `status`/`diff` on worktrees you do not control (observe a bare mirror instead, as `git-watch`'s fixture does).
 2. **Purity is still syntactic.** r3 closes every route found in review; it cannot prove none remain. The design already says so. What changed is that each known route is now a named rule in the contract and a test, and Landlock stays the backstop (DB-17 proves it acts alone).
 3. **Still never run under real systemd.** The seccomp fix (HF-07) is derived from `systemd-analyze syscall-filter` group membership and checked by DB-15, but no unit has been started by PID 1. The first DGX step should install `meminfo-watch` as a unit and confirm `DAEMON_START.landlock.status == "enforced"`.
-4. **`ctx.run` arguments are the manifest reviewer's responsibility.** The skeleton polices *which* command runs, not what its flags do. The denylist now covers the known command runners; anything else on a manifest's `commands` list deserves the same scrutiny as Git got here.
+4. **Closed in contract 5 (R-2): `ctx.run` is gone.** *Was:* **`ctx.run` arguments are the manifest reviewer's responsibility.** The skeleton polices *which* command runs, not what its flags do. The denylist now covers the known command runners; anything else on a manifest's `commands` list deserves the same scrutiny as Git got here.

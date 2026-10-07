@@ -237,7 +237,7 @@ def probe_digest(manifest_path: str, seed: int) -> int:
     if not hasattr(module, "digest"):
         print(json.dumps({"status": "N/A", "reason": "no digest()"}))
         return EXIT_OK
-    ctx = Context(policy, cycle_budget=m.cycle_budget_seconds, tmp_dir=os.path.join(policy.output_dir, TMP_DIR))
+    ctx = Context(policy)
     snapshot = to_json_value(module.sense(ctx))
     sections = render.normalize_sections(module.digest(snapshot, ()))
     stamp = {"seq": 1, "head": "0" * 64, "last_event_utc": None}

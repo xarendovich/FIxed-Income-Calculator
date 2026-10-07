@@ -50,9 +50,9 @@ import threading
 import time
 from dataclasses import dataclass
 
-from . import (BATTERY_SCHEMA, EXIT_USAGE, LEDGER_NAME,
+from . import (BATTERY_SCHEMA, EXIT_USAGE, LEDGER_NAME, SYSTEM_PATH,
                QUARANTINE_DIR, RESERVED_EVENT_TYPES, VERSION, guard, landlock, ledger,
-               manifest as manifest_mod, proc, unitgen)
+               manifest as manifest_mod, unitgen)
 from .canonical import sha256_hex, strict_loads
 
 PATTERN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -107,7 +107,7 @@ class Workspace:
         self.ledger = os.path.join(self.output, LEDGER_NAME)
 
     def env(self, **extra):
-        env = {"HOME": self.home, "SPARK_DAEMON_HOME": self.home, "PATH": proc.SYSTEM_PATH,
+        env = {"HOME": self.home, "SPARK_DAEMON_HOME": self.home, "PATH": SYSTEM_PATH,
                "LANG": "C.UTF-8", "SPARK_DAEMON_TEST": "1",
                "SPARK_DAEMON_TEST_INTERVAL_MS": str(TEST_INTERVAL_MS), "PYTHONDONTWRITEBYTECODE": "1"}
         env.update({k: v for k, v in extra.items() if v is not None})
@@ -350,7 +350,7 @@ def db07(ws, c):
 
 
 def _strace():
-    return shutil.which("strace", path=proc.SYSTEM_PATH)
+    return shutil.which("strace", path=SYSTEM_PATH)
 
 
 def _fault(ws, c, inject_args, label):
@@ -606,7 +606,7 @@ def db15(ws, c, threshold, unit_options=None):
     if missing:
         c.state, c.evidence = "FAIL", f"missing directives: {', '.join(missing)}"
         return
-    analyze = shutil.which("systemd-analyze", path=proc.SYSTEM_PATH)
+    analyze = shutil.which("systemd-analyze", path=SYSTEM_PATH)
     if not analyze:
         c.state, c.evidence = "UNKNOWN", "all required directives present; systemd-analyze not installed"
         return
@@ -769,7 +769,7 @@ def main(manifest_path: str, *, seed: int, quick: bool, workdir: str | None, thr
         "daemon_code_sha256": j.code_sha, "workspace": j.ws.root, "rewrites": j.ws.rewrites,
         "environment": {"python": sys.version.split()[0], "kernel": os.uname().release,
                         "machine": os.uname().machine, "strace": bool(_strace()),
-                        "systemd_analyze": bool(shutil.which("systemd-analyze", path=proc.SYSTEM_PATH))},
+                        "systemd_analyze": bool(shutil.which("systemd-analyze", path=SYSTEM_PATH))},
         "checks": [{"id": c.id, "title": c.title, "state": c.state, "evidence": c.evidence}
                    for c in j.checks],
     }

@@ -1,9 +1,10 @@
-"""Hang fixture: each observation blocks for 3 seconds in an allowlisted command."""
+"""Hang fixture: each observation blocks opening a FIFO that has no writer, until the cycle's
+alarm ends it (contract 5: a daemon runs no program, so the block is a read)."""
 
 
 def sense(ctx):
-    ctx.run(["sleep", "3"])
-    return {"value": "slept"}
+    ctx.read_text("~/data/fifo")
+    return {"value": "unblocked"}
 
 
 def decide(prev, snapshot):

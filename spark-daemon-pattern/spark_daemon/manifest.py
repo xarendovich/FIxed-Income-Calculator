@@ -19,7 +19,6 @@ VERSION_RE = re.compile(r"^(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})$
 EVENT_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,47}$")
 # Paths: absolute or "~/", and only characters that are safe in a systemd unit file.
 PATH_RE = re.compile(r"^(~|~/[A-Za-z0-9._/-]*|/[A-Za-z0-9._/-]*)$")
-COMMAND_RE = re.compile(r"^[a-z][a-z0-9._-]{0,31}$")
 USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 PURPOSE_RE = re.compile(r"^[A-Za-z0-9 .,;:()/'+-]{10,200}$")
 MANIFEST_MAX_BYTES = 65536
@@ -61,46 +60,6 @@ BASE_DENY = (
 )
 # An output directory may not sit inside any of these.
 FORBIDDEN_OUTPUT_ROOTS = ("~/spark-core", "~/spark-governance") + BASE_DENY[2:]
-# Shells, interpreters, network clients, privilege tools, command runners and file
-# mutators are never runnable. Names that run other programs (env, xargs, nice, timeout,
-# tar --to-command, less !cmd, ...) count as shells: any one of them turns a manifest's
-# command list into "run anything".
-FORBIDDEN_COMMANDS = frozenset({
-    # shells and command runners
-    "sh", "bash", "dash", "zsh", "ksh", "mksh", "csh", "tcsh", "fish", "ash", "busybox",
-    "toybox", "env", "xargs", "find", "nice", "ionice", "nohup", "timeout", "stdbuf", "setsid",
-    "watch", "script", "expect", "chroot", "unshare", "nsenter", "flock", "parallel", "make",
-    # text tools that can execute or write files
-    "awk", "gawk", "mawk", "nawk", "sed", "ed", "ex", "vi", "vim", "nvim", "nano", "emacs",
-    "less", "more", "man", "tar", "zip", "unzip", "patch", "split", "csplit",
-    # interpreters and compilers (see also FORBIDDEN_COMMAND_PREFIXES)
-    "gcc", "cc", "clang", "ld", "gdb", "strace", "ltrace", "java", "tclsh", "wish", "irb",
-    "pip", "pip3", "npm", "npx", "deno", "bun", "pwsh",
-    # privilege and identity
-    "sudo", "su", "doas", "pkexec", "runuser", "setpriv", "capsh",
-    # network
-    "ssh", "scp", "sftp", "rsync", "curl", "wget", "nc", "ncat", "netcat", "socat", "telnet",
-    "ftp", "openssl", "gpg", "gpg2", "ip", "iptables", "nft", "nmcli", "busctl", "dbus-send",
-    # services, containers, scheduling, processes
-    "docker", "podman", "systemctl", "systemd-run", "loginctl", "crontab", "at", "batch",
-    "kill", "pkill", "killall", "shutdown", "reboot", "halt", "poweroff",
-    # file mutation
-    "mount", "umount", "chmod", "chown", "chgrp", "rm", "rmdir", "mv", "cp", "ln", "dd", "tee",
-    "touch", "truncate", "shred", "install", "mkdir", "mkfifo", "mknod", "sqlite3",
-})
-# Any command whose name starts with one of these is an interpreter family (python3.12,
-# perl5.38, node18, ruby3.2, php8.3, lua5.4, pypy3, ...). Refused like the names above.
-FORBIDDEN_COMMAND_PREFIXES = ("python", "pypy", "perl", "node", "ruby", "php", "lua", "tcl",
-                              "java", "busybox")
-
-
-def command_refusal(cmd: str):
-    """Why a bare command name is never allowed, or None if it may be declared."""
-    if cmd in FORBIDDEN_COMMANDS or cmd.startswith(FORBIDDEN_COMMAND_PREFIXES):
-        return f"{cmd!r} is never allowed (shell, interpreter, network, privilege or file-mutation tool)"
-    return None
-
-
 def path_refusal(path: str):
     """Why a manifest path is refused beyond PATH_RE, or None. "." and ".." segments, empty
     segments and trailing slashes are refused so that the path a reviewer reads is the path
@@ -117,19 +76,23 @@ def path_refusal(path: str):
 
 TOP_KEYS = {
     "manifest_schema", "name", "version", "purpose", "daemon_class", "trigger", "reads",
-    "commands", "output_dir", "network", "run_as", "resources", "cycle_budget_seconds",
+    "output_dir", "network", "run_as", "resources", "cycle_budget_seconds",
     "blind_limit_seconds", "ledger", "digest",
 }
-# Schema 2 (contract 3.x) to schema 3 (contract 4.0.0): what changed, for the migration message.
+# Earlier schemas, and what changed since, for the migration message: schema 2 (contract 3.x),
+# schema 3 (contract 4.0.0), schema 4 (contract 5.0.0).
 SCHEMA_2 = "spark-daemon-manifest/2"
-MIGRATION_2_TO_3 = {
+SCHEMA_3 = "spark-daemon-manifest/3"
+REMOVED_KEYS = {
     "deny": "removed in contract 4.0.0 (R-1): what a daemon reads is exactly its reads list, and no "
             "read may contain an always-denied path, so a deny list can no longer add anything. "
             "Delete the key; narrow reads if a path you meant to exclude lies inside one",
     "watchdog_seconds": "removed in contract 4.0.0 (R-6): set cycle_budget_seconds, the longest a "
                         "whole cycle may take; the watchdog is derived from it",
-    "step_timeout_seconds": "removed in contract 4.0.0 (R-6): every ctx call now gets the time left "
-                            "in the cycle's budget (cycle_budget_seconds)",
+    "step_timeout_seconds": "removed in contract 4.0.0 (R-6): the cycle's budget "
+                            "(cycle_budget_seconds) bounds the whole cycle",
+    "commands": "removed in contract 5.0.0 (R-2): a daemon runs no program; read what it observes "
+                "as files. A daemon that needs a program is not a generic daemon (see ADJUDICATION-V5.md)",
 }
 
 
@@ -180,7 +143,6 @@ class Manifest:
     daemon_class: str
     trigger: Trigger
     reads: tuple
-    commands: tuple
     output_dir: str
     network_mode: str
     run_as: RunAs
@@ -275,20 +237,21 @@ class _Checker:
 
 def parse(data: dict, path: str = "<memory>") -> Manifest:
     c = _Checker()
-    if isinstance(data, dict) and data.get("manifest_schema") == SCHEMA_2:
-        # Contract 4.0.0 migration: say exactly what changed, field by field, instead of listing
-        # unknown and missing keys.
-        c.fail("manifest_schema", f"is {SCHEMA_2} (contract 3.x); contract 4.0.0 needs {MANIFEST_SCHEMA!r}")
-        for key, why in MIGRATION_2_TO_3.items():
+    if isinstance(data, dict) and data.get("manifest_schema") in (SCHEMA_2, SCHEMA_3):
+        # Migration: say exactly what changed, field by field, instead of listing unknown and
+        # missing keys.
+        old = data["manifest_schema"]
+        c.fail("manifest_schema", f"is {old}; contract 5.0.0 needs {MANIFEST_SCHEMA!r}")
+        for key, why in REMOVED_KEYS.items():
             if key in data:
                 c.fail(key, why)
         if "cycle_budget_seconds" not in data:
             c.fail("cycle_budget_seconds", "required since contract 4.0.0: the longest a whole cycle may take")
         raise ManifestError(c.problems)
     if isinstance(data, dict):
-        for key in sorted(set(MIGRATION_2_TO_3) & set(data)):
-            c.fail(key, MIGRATION_2_TO_3[key])
-        data = {k: v for k, v in data.items() if k not in MIGRATION_2_TO_3}
+        for key in sorted(set(REMOVED_KEYS) & set(data)):
+            c.fail(key, REMOVED_KEYS[key])
+        data = {k: v for k, v in data.items() if k not in REMOVED_KEYS}
     if not c.keys("manifest", data, TOP_KEYS):
         raise ManifestError(c.problems)
 
@@ -315,24 +278,6 @@ def parse(data: dict, path: str = "<memory>") -> Manifest:
             trigger = Trigger(kind, interval)
 
     reads = c.path_list("reads", data.get("reads"), 1, 32)
-
-    commands = ()
-    cmds = data.get("commands")
-    if not isinstance(cmds, list) or len(cmds) > 8:
-        c.fail("commands", "must be a list of at most 8 command names")
-    else:
-        seen = []
-        for i, cmd in enumerate(cmds):
-            name_ok = c.text(f"commands[{i}]", cmd, COMMAND_RE, "must be a bare command name")
-            if name_ok is None:
-                continue
-            if command_refusal(cmd):
-                c.fail(f"commands[{i}]", command_refusal(cmd))
-            elif cmd in seen:
-                c.fail(f"commands[{i}]", "duplicate command")
-            else:
-                seen.append(cmd)
-        commands = tuple(seen)
 
     output_dir = c.text("output_dir", data.get("output_dir"), PATH_RE,
                         "must be an absolute or ~/ path of letters, digits and ._/-")
@@ -451,7 +396,7 @@ def parse(data: dict, path: str = "<memory>") -> Manifest:
         raise ManifestError([f"manifest: {e}"]) from None
     return Manifest(
         name=name, version=version, purpose=purpose, daemon_class=daemon_class,
-        trigger=trigger, reads=reads, commands=commands, output_dir=output_dir,
+        trigger=trigger, reads=reads, output_dir=output_dir,
         network_mode=network_mode, run_as=run_as, resources=resources,
         cycle_budget_seconds=cycle_budget, blind_limit_seconds=blind_limit, ledger=ledger,
         digest=digest, sha256=digest_sha, path=os.path.abspath(path),

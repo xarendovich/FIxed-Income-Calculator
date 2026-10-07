@@ -13,13 +13,11 @@ it cannot:
 
 import json
 import os
-import shutil
 import socket
 import stat
 import sys
-import types
 
-from . import KNOWN_OUTPUT_ENTRIES, QUARANTINE_DIR, TMP_DIR, TMP_PREFIX, proc
+from . import KNOWN_OUTPUT_ENTRIES, QUARANTINE_DIR, TMP_DIR, TMP_PREFIX
 from .paths import expand, within
 
 
@@ -36,7 +34,6 @@ class PolicyViolation(PermissionError):
 VIOLATIONS = {"count": 0, "last": None}
 
 _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
-_ALLOWED_DEVICES = ("/dev/null",)
 _BLOCKED_EVENTS = frozenset({
     "os.system", "os.exec", "os.posix_spawn", "os.spawn", "os.fork", "os.forkpty",
     "pty.spawn", "os.startfile",
@@ -60,19 +57,13 @@ class Policy:
     it (purity.py forbids private attributes, which is the only route) still could not widen
     its own bounds. The hook additionally captures its own copies at install time."""
 
-    __slots__ = ("output_dir", "reads", "deny", "commands", "notify_target")
+    __slots__ = ("output_dir", "reads", "deny", "notify_target")
 
     def __init__(self, manifest, notify_socket=None):
-        commands = {}
-        for name in manifest.commands:
-            found = shutil.which(name, path=proc.SYSTEM_PATH)
-            if found:
-                commands[name] = os.path.realpath(found)
         values = {
             "output_dir": expand(manifest.output_dir),
             "reads": tuple(expand(p) for p in manifest.reads),
             "deny": tuple(expand(p) for p in manifest.all_deny),
-            "commands": types.MappingProxyType(commands),
             "notify_target": _notify_target(notify_socket if notify_socket is not None
                                             else os.environ.get("NOTIFY_SOCKET")),
         }
@@ -180,7 +171,6 @@ def install_audit_hook(policy: Policy, mode: str = "enforce") -> None:
     """Install the process-wide audit hook. It cannot be removed once installed."""
     if mode not in ("enforce", "record"):
         raise ValueError("mode must be 'enforce' or 'record'")
-    allowed_exec = frozenset(policy.commands.values())
     notify = policy.notify_target
     deny = tuple(policy.deny)
     output_dir = policy.output_dir
@@ -216,18 +206,16 @@ def install_audit_hook(policy: Policy, mode: str = "enforce") -> None:
                 mode_arg and any(ch in str(mode_arg) for ch in "wax+"))
             if denied(full):
                 violation("open-denied-path", full)
-            elif writing and full not in _ALLOWED_DEVICES and not writable(full):
+            elif writing and not writable(full):
                 violation("write-outside-output-dir", full)
         elif event in ("os.listdir", "os.scandir"):
             full = as_path(args[0] if args else ".")
             if full is not None and denied(full):
                 violation("list-denied-path", full)
         elif event == "subprocess.Popen":
+            # v5 (R-2): a daemon runs no program, so every spawn is a violation.
             executable, argv = args[0], args[1]
-            exe = executable if executable is not None else (argv[0] if argv else None)
-            exe = as_path(exe)
-            if exe not in allowed_exec:
-                violation("spawn-not-allowlisted", exe)
+            violation("spawn", as_path(executable if executable is not None else (argv[0] if argv else None)))
         elif event in _BLOCKED_EVENTS:
             violation(event)
         elif event == "socket.__new__":

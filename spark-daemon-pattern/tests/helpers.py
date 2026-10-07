@@ -15,7 +15,7 @@ EXAMPLE = os.path.join(ROOT, "examples", "meminfo-watch")
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from spark_daemon.proc import SYSTEM_PATH  # noqa: E402  (needs ROOT on sys.path)
+from spark_daemon import SYSTEM_PATH  # noqa: E402  (needs ROOT on sys.path)
 
 
 class Sandbox:

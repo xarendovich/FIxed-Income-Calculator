@@ -93,22 +93,23 @@ The battery quotes the envelope as well. An envelope that does not match the fil
 
 Nothing here builds that subsystem. This is the protocol it would follow, so its boundary is settled before it exists:
 
-1. `describe` → keep `contract_version` and `contract_sha256`. Read `contract.code`, `contract.ctx` and `contract.git`: that is the whole interface.
-2. `scaffold --name N --dir D` → a folder that already passes the battery 18/18. Edit only `daemon.py` and the manifest's `purpose`, `reads`, `commands`, `trigger`, `ledger.event_types`, `digest`. Imitate the closest reference daemon (table below).
+1. `describe` → keep `contract_version` and `contract_sha256`. Read `contract.code` and `contract.ctx`: that is the whole interface.
+2. `scaffold --name N --dir D` → a folder that already passes the battery 18/18. Edit only `daemon.py` and the manifest's `purpose`, `reads`, `trigger`, `ledger.event_types`, `digest`. Imitate the closest reference daemon (table below).
 3. `envelope --producer-kind model --producer-id <run id>` after every edit.
 4. `validate --json --envelope` until `valid`. Diagnostics carry `layer`, `where` (manifest field or `daemon.py`) and `line`.
 5. `precheck --envelope` until `OK`.
 6. `battery --envelope` once. The report goes to a human, with the envelope, the diff against the closest reference daemon, and the install plan (`unit --plan`).
 7. Stop. Activation is Class C.
 
-**It must never:** edit anything under `spark_daemon/`, `contract/` or `tests/`; widen a manifest (`reads`, `commands`, `resources`) just to make a check pass without saying so in `intent`; retry the battery with a different seed to fish for a PASS (the seed is recorded); or present a precheck OK as a pass.
+**It must never:** edit anything under `spark_daemon/`, `contract/` or `tests/`; widen a manifest (`reads`, `resources`) just to make a check pass without saying so in `intent`; retry the battery with a different seed to fish for a PASS (the seed is recorded); or present a precheck OK as a pass.
 
 | Reference daemon | Idiom | ctx surface |
 | --- | --- | --- |
 | `meminfo-watch` | Parse a kernel text file into bands | `read_text` on `/proc` |
 | `disk-watch` | Threshold bands over a numeric gauge; path presence | `disk_usage` |
 | `dir-watch` | Inventory diff over untrusted names; bounded, batched events | `list_dir`, `stat` (symlink-safe) |
-| `git-watch` | Observe a tool's output; failures and timeouts as "unavailable"; bare-repo fixture | `git` (read-only subcommands, private index copy) |
+
+Contract 5 removed `git-watch` with `ctx.run` and `ctx.git` (R-2): a daemon runs no program. It remains in history at `a3599fd`.
 
 Every reference daemon ships a `fixture_home/` when it reads under `~`, because the battery now requires a clean run with zero `DAEMON_ERROR` (PD-28).
 

@@ -47,10 +47,12 @@ class ManifestTests(unittest.TestCase):
     def test_network_refused(self):
         self.assertRefused(dict(example(), network={"mode": "named"}), "relaxation R2")
 
-    def test_forbidden_commands(self):
-        for cmd in ("bash", "curl", "sudo", "python3", "systemctl", "sqlite3", "rm"):
+    def test_commands_refused(self):
+        # Contract 5 (R-2): no command list at all, so no list of forbidden names to keep
+        # complete. Replaces test_forbidden_commands.
+        for cmd in ("bash", "curl", "git"):
             with self.subTest(cmd=cmd):
-                self.assertRefused(dict(example(), commands=[cmd]), "never allowed")
+                self.assertRefused(dict(example(), commands=[cmd]), "removed in contract 5.0.0")
 
     def test_reads_inside_denied_paths(self):
         for path in ("~/spark-core/data", "~/spark-core/data/spark.db", "~/.ssh/id_ed25519",

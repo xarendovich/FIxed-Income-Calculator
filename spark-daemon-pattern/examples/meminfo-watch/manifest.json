@@ -1,12 +1,11 @@
 {
-  "manifest_schema": "spark-daemon-manifest/3",
+  "manifest_schema": "spark-daemon-manifest/4",
   "name": "meminfo-watch",
   "version": "0.1.0",
   "purpose": "Records when unified-memory headroom moves between bands, from /proc/meminfo and memory pressure (PSI).",
   "daemon_class": "observe",
   "trigger": {"kind": "poll", "interval_seconds": 30},
   "reads": ["/proc/meminfo", "/proc/pressure/memory"],
-  "commands": [],
   "output_dir": "~/spark-daemons/meminfo-watch",
   "network": {"mode": "none"},
   "run_as": {"unit": "system", "user": "spark-meminfo"},

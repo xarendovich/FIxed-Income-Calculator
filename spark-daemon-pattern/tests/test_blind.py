@@ -1,7 +1,6 @@
 """Blind period (r3.5): ctx.unsettled(), blind_limit_seconds and SENSE_BLIND, and the unit
 never restarting a fail-closed exit."""
 
-import ast
 import importlib.util
 import json
 import os
@@ -343,58 +342,6 @@ class BlindLimitManifestTests(unittest.TestCase):
         self.assertRefused(d, "adds the required blind_limit_seconds")
 
 
-class StubResult:
-    def __init__(self, stdout, truncated=False):
-        self.stdout, self.truncated, self.timed_out = stdout, truncated, False
-        self.returncode = None if truncated else 0
-
-
-class GitWatchUnsettledTests(unittest.TestCase):
-    """The reference use: git-watch re-reads refs and the dirty count and reports a moving
-    repository as unsettled rather than recording a half-way state."""
-
-    def setUp(self):
-        spec = importlib.util.spec_from_file_location(
-            "git_watch", os.path.join(ROOT, "examples", "git-watch", "daemon.py"))
-        self.daemon = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(self.daemon)
-
-    def ctx(self, refs_reads, status_reads):
-        """Answers ctx.git from two queues of outputs (a StubResult stands for a truncated one)."""
-        class StubCtx:
-            Missing, TooLarge = context.Missing, context.TooLarge
-            unsettled = context.Context.unsettled
-
-            def git(self, repo, args, max_bytes=65536, index_copy=False):
-                if args[0] == "rev-parse":
-                    return StubResult("false\n" if "--is-bare-repository" in args else "main\n")
-                out = (refs_reads if args[0] == "for-each-ref" else status_reads).pop(0)
-                return out if isinstance(out, StubResult) else StubResult(out)
-        return StubCtx()
-
-    def test_moving_refs_are_unsettled(self):
-        a, b = "a" * 40 + " refs/heads/main\n", "b" * 40 + " refs/heads/main\n"
-        result = self.daemon.sense(self.ctx([a, b], ["", ""]))
-        self.assertIsInstance(result, context.Unsettled)
-        self.assertEqual(result.reason, "REPO_CHANGING")
-
-    def test_a_changing_worktree_is_unsettled(self):
-        refs = "a" * 40 + " refs/heads/main\n"
-        result = self.daemon.sense(self.ctx([refs, refs], [" M one\0", " M one\0?? build.o\0"]))
-        self.assertIsInstance(result, context.Unsettled)
-
-    def test_output_over_the_cap_fails_the_cycle(self):
-        # Before r3.5 this was accepted as "dirty: null" every cycle, so it never reached the limit.
-        refs = "a" * 40 + " refs/heads/main\n"
-        with self.assertRaises(context.TooLarge):
-            self.daemon.sense(self.ctx([refs], [StubResult("?? x\0" * 1000, truncated=True)]))
-
-    def test_a_still_repository_is_observed(self):
-        refs = "a" * 40 + " refs/heads/main\n"
-        result = self.daemon.sense(self.ctx([refs, refs], [" M one\0", " M one\0"]))
-        self.assertEqual((result["head"], result["dirty"]), ("main", 1))
-
-
 class DirWatchCapacityTests(unittest.TestCase):
     """r4.3 (HF-33, LTC-H01): past MAX_ENTRIES, ctx.list_dir returns the first entries in
     directory order. Diffing that partial listing as a full inventory reported files as
@@ -411,7 +358,7 @@ class DirWatchCapacityTests(unittest.TestCase):
         class Policy:
             def readable(self, path, follow=True):
                 return path
-        self.ctx = context.Context(Policy(), cycle_budget=10, tmp_dir=self.tmp)
+        self.ctx = context.Context(Policy())
 
     def tearDown(self):
         shutil.rmtree(self.tmp)
@@ -466,22 +413,10 @@ class NoRestartTests(unittest.TestCase):
 
     def test_a_stop_outlasts_one_watchdog_period(self):
         # r3.9 (HF-31): a stop is honoured between cycles; a fixed 30 s SIGKILLed slow cycles.
-        for name in ("meminfo-watch", "git-watch"):
+        for name in sorted(os.listdir(os.path.join(ROOT, "examples"))):
             m = manifest.load(os.path.join(ROOT, "examples", name, "manifest.json"))
             text = unitgen.generate(m, root=ROOT)
             self.assertIn(f"TimeoutStopSec={m.watchdog_seconds + 10}\n", text)
-
-    def test_git_watch_worst_case_sense_fits_its_cycle_budget(self):
-        # r3.9 (HF-30): six Git calls per worktree cycle since r3.5. Since r4.11 (R-6) each call
-        # gets only what is left of the cycle budget, and the watchdog is derived from that
-        # budget, so the HF-30 shape cannot recur; this pins the call count it was measured on.
-        m = manifest.load(os.path.join(ROOT, "examples", "git-watch", "manifest.json"))
-        with open(os.path.join(ROOT, "examples", "git-watch", "daemon.py")) as fh:
-            tree = ast.parse(fh.read())
-        calls = sum(1 for node in ast.walk(tree)     # counted by the parser, so line wrapping
-                    if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_git")
-        self.assertEqual(calls, 6)
-        self.assertGreaterEqual(m.watchdog_seconds, 2 * m.cycle_budget_seconds)
 
     def test_uncertain_commit_stays_restartable(self):
         self.assertNotIn(70, unitgen.NO_RESTART_EXIT_CODES)

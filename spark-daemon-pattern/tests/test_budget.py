@@ -1,7 +1,9 @@
 """The cycle budget (r4.11, R-6): cycle_budget_seconds is the one declared cycle time; every
 blocking call gets what is left of it, an overrunning cycle fails within its deadline, and the
 unit's watchdog and stop timeouts are derived from it and cannot contradict it. The acceptance
-tests of the owner's r4.9 handoff, Phase C (R-6), with the manifest migration (R-1)."""
+tests of the owner's r4.9 handoff, Phase C (R-6), with the manifest migration (R-1). Since
+contract 5 (R-2, E-2) the cycle's alarm is the only in-process deadline: there are no commands
+to hand the time left to."""
 
 import json
 import os
@@ -17,16 +19,14 @@ from spark_daemon import judge, manifest, unitgen
 SLOW = {
     "busy_loop": "    while True:\n        pass\n",
     "blocking_read": "    ctx.read_text('~/data/fifo')\n",
-    "slow_command": "    ctx.run(['sleep', '30'])\n",
     "swallowed": "    try:\n        while True:\n            pass\n    except BaseException:\n        pass\n",
 }
 
 
-def fixture(body, commands=()):
+def fixture(body):
     tmp = tempfile.mkdtemp(prefix="spark-budget-")
     with open(os.path.join(FIXTURES, "counter", "manifest.json")) as fh:
         data = json.load(fh)
-    data["commands"] = list(commands)
     with open(os.path.join(tmp, "manifest.json"), "w") as fh:
         json.dump(data, fh)
     with open(os.path.join(tmp, "daemon.py"), "w") as fh:
@@ -36,8 +36,8 @@ def fixture(body, commands=()):
 
 
 class CycleDeadlineTests(unittest.TestCase):
-    def run_slow(self, kind, commands=()):
-        tmp = fixture(SLOW[kind], commands)
+    def run_slow(self, kind):
+        tmp = fixture(SLOW[kind])
         self.addCleanup(shutil.rmtree, tmp)
         sb = Sandbox(tmp)
         self.addCleanup(shutil.rmtree, sb.tmp)
@@ -48,8 +48,8 @@ class CycleDeadlineTests(unittest.TestCase):
         p = sb.run(cycles=2, timeout=60, SPARK_DAEMON_TEST_CYCLE_BUDGET_MS="400")
         return p, time.monotonic() - started, sb.records()
 
-    def assertFailsWithinTheDeadline(self, kind, commands=()):
-        p, elapsed, records = self.run_slow(kind, commands)
+    def assertFailsWithinTheDeadline(self, kind):
+        p, elapsed, records = self.run_slow(kind)
         self.assertEqual(p.returncode, 0, p.stderr)
         errors = [r["payload"] for r in records if r["event_type"] == "DAEMON_ERROR"]
         self.assertEqual(errors[0], {"category": "CYCLE_BUDGET_EXCEEDED", "exception_type": "CycleBudgetExceeded"},
@@ -64,9 +64,6 @@ class CycleDeadlineTests(unittest.TestCase):
 
     def test_a_blocking_read_fails_within_the_deadline(self):
         self.assertFailsWithinTheDeadline("blocking_read")
-
-    def test_a_command_gets_only_the_time_left(self):
-        self.assertFailsWithinTheDeadline("slow_command", commands=["sleep"])
 
     def test_catching_the_alarm_does_not_save_the_cycle(self):
         self.assertFailsWithinTheDeadline("swallowed")
@@ -125,7 +122,27 @@ class MigrationTests(unittest.TestCase):
         where = [p.split(":")[0] for p in ctx.exception.problems]
         self.assertEqual(where, ["manifest_schema", "deny", "watchdog_seconds", "step_timeout_seconds",
                                  "cycle_budget_seconds"])
-        self.assertTrue(all("4.0.0" in p for p in ctx.exception.problems), ctx.exception.problems)
+        self.assertIn("contract 5.0.0 needs", ctx.exception.problems[0])
+        self.assertTrue(all("4.0.0" in p for p in ctx.exception.problems[1:]), ctx.exception.problems)
+
+    def test_a_contract_4_manifest_is_told_commands_are_gone(self):
+        """R-2: a schema-3 manifest learns, field by field, that commands left with contract 5."""
+        with open(os.path.join(EXAMPLE, "manifest.json")) as fh:
+            data = json.load(fh)
+        data.update(manifest_schema="spark-daemon-manifest/3", commands=["git"])
+        with self.assertRaises(manifest.ManifestError) as ctx:
+            manifest.parse(data)
+        where = [p.split(":")[0] for p in ctx.exception.problems]
+        self.assertEqual(where, ["manifest_schema", "commands"])
+        self.assertIn("removed in contract 5.0.0 (R-2)", ctx.exception.problems[1])
+
+    def test_commands_are_refused_under_the_current_schema_too(self):
+        with open(os.path.join(EXAMPLE, "manifest.json")) as fh:
+            data = json.load(fh)
+        data["commands"] = []
+        with self.assertRaises(manifest.ManifestError) as ctx:
+            manifest.parse(data)
+        self.assertEqual([p.split(":")[0] for p in ctx.exception.problems], ["commands"])
 
 
 if __name__ == "__main__":

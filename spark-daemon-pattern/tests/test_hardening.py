@@ -11,7 +11,7 @@ import tempfile
 import unittest
 
 from helpers import ENTRY, EXAMPLE, FIXTURES, ROOT, Sandbox
-from spark_daemon import guard, manifest, proc, purity, render, unitgen
+from spark_daemon import SYSTEM_PATH, guard, manifest, purity, render, unitgen
 
 SENSE_DECIDE = '''
 def decide(prev, snapshot):
@@ -19,12 +19,11 @@ def decide(prev, snapshot):
 '''
 
 
-def fixture_with(source: str, commands=()):
+def fixture_with(source: str):
     """A throwaway fixture directory: the counter manifest with a new daemon.py."""
     tmp = tempfile.mkdtemp(prefix="spark-fixture-")
     with open(os.path.join(FIXTURES, "counter", "manifest.json")) as fh:
         data = json.load(fh)
-    data["commands"] = list(commands)
     with open(os.path.join(tmp, "manifest.json"), "w") as fh:
         json.dump(data, fh)
     with open(os.path.join(tmp, "daemon.py"), "w") as fh:
@@ -47,16 +46,16 @@ class ManifestHardeningTests(unittest.TestCase):
             return e.problems
         return []
 
-    def test_interpreter_families_and_command_runners_are_refused(self):
-        for cmd in ("python3.12", "python3.11", "perl5.38", "node18", "php8", "tar", "less",
-                    "timeout", "nice", "gawk", "busybox", "openssl"):
-            with self.subTest(cmd=cmd):
-                self.assertTrue(any("never allowed" in p for p in self.problems(commands=[cmd])))
-
-    def test_harmless_commands_still_allowed(self):
-        for cmd in ("git", "df", "uptime", "nvidia-smi", "sleep"):
-            with self.subTest(cmd=cmd):
-                self.assertEqual(self.problems(commands=[cmd]), [])
+    def test_a_commands_list_is_refused_with_its_migration(self):
+        # Contract 5 (R-2): a daemon runs no program, so the commands key is gone; any value,
+        # the empty list included, is refused with the reason. Replaces the r3 allow/deny tests
+        # of individual command names (test_interpreter_families_and_command_runners_are_refused,
+        # test_harmless_commands_still_allowed).
+        for value in ([], ["git"], ["python3.12"]):
+            with self.subTest(commands=value):
+                problems = self.problems(commands=value)
+                self.assertEqual(len(problems), 1, problems)
+                self.assertTrue(problems[0].startswith("commands: removed in contract 5.0.0"), problems)
 
     def test_dot_segments_and_trailing_slashes_refused(self):
         self.assertTrue(self.problems(reads=["~/data/../.ssh"]))
@@ -105,174 +104,6 @@ class ManifestHardeningTests(unittest.TestCase):
                 manifest.to_dict(path)
         finally:
             shutil.rmtree(tmp)
-
-
-class GitHardeningTests(unittest.TestCase):
-    def test_refusals(self):
-        refused = [
-            [], ["-c", "alias.x=!id", "x"], ["config", "--get", "x"], ["symbolic-ref", "HEAD", "x"],
-            ["log", "--output=/tmp/x"], ["log", "--outp=/tmp/x"], ["diff", "--no-index", "a", "b"],
-            ["diff", "/etc/passwd", "/etc/hosts"], ["log", "--", "../outside"],
-            ["log", "--format=%G?"], ["log", "--show-signature"], ["log", "--ext-diff"],
-            ["blame", "--contents", "x", "f"], ["blame", "-Sfile", "f"], ["ls-files", "-X", "f"],
-            ["diff", "-Oorder"], ["cat-file", "--batch"], ["log", "--st"],
-        ]
-        for args in refused:
-            with self.subTest(args=args):
-                self.assertIsNotNone(proc.git_refusal(args))
-
-    def test_allowed(self):
-        allowed = [
-            ["rev-parse", "HEAD"], ["rev-parse", "--abbrev-ref", "HEAD"], ["rev-parse", "--git-dir"],
-            ["status", "--porcelain=v1", "-z"], ["log", "-n", "5", "--pretty=format:%H %s"],
-            ["log", "HEAD~3..HEAD", "--stat"], ["log", "-S", "needle"], ["diff", "--", "src/x.py"],
-        ]
-        for args in allowed:
-            with self.subTest(args=args):
-                self.assertIsNone(proc.git_refusal(args))
-
-    def test_diff_subcommands_get_no_ext_diff_and_no_textconv(self):
-        seen = {}
-
-        def fake_run(argv, **kwargs):
-            seen["argv"] = argv
-            return proc.RunResult(0, "", False, False)
-
-        original = proc.run
-        proc.run = fake_run
-        try:
-            proc.git("/repo", ["log", "-p"], executables={"git": "/usr/bin/git"}, timeout=5, max_bytes=100)
-        finally:
-            proc.run = original
-        argv = seen["argv"]
-        i = argv.index("log")
-        self.assertEqual(argv[i:i + 4], ["log", "--no-ext-diff", "--no-textconv", "-p"])
-        # Only the declared repository is trusted for Git's ownership check (PD-25).
-        self.assertIn("safe.directory=/repo", argv)
-        self.assertNotIn("safe.directory=*", argv)
-
-
-@unittest.skipUnless(shutil.which("git", path=proc.SYSTEM_PATH), "git not installed")
-class GitHistoryIntegrityTests(unittest.TestCase):
-    """The Observer's WBS 2.5 hardened Git profile (A1, evidence E1-E3), adopted for ctx.git
-    after a cross-check against the Spark handoffs: each case was reproduced against r3."""
-
-    GIT = {"git": "/usr/bin/git"}
-
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.repo = os.path.join(self.tmp, "r")
-        self.env = {"PATH": proc.SYSTEM_PATH, "HOME": self.tmp, "GIT_CONFIG_GLOBAL": "/dev/null",
-                    "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-                    "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
-        self.g("init", "-q", "-b", "main", self.repo, cwd=self.tmp)
-        for i in range(3):
-            self.g("commit", "-q", "--allow-empty", "-m", f"c{i}")
-
-    def tearDown(self):
-        shutil.rmtree(self.tmp)
-
-    def g(self, *args, cwd=None, data=None):
-        return subprocess.run(["git", *args], cwd=cwd or self.repo, env=self.env, input=data,
-                              capture_output=True, check=True).stdout.decode().strip()
-
-    def ctx_git(self, *args):
-        return proc.git(self.repo, list(args), executables=self.GIT, timeout=10, max_bytes=65536)
-
-    def test_repository_gpg_program_never_runs(self):
-        raw = self.g("cat-file", "commit", "HEAD")
-        head, _, msg = raw.partition("\n\n")
-        signed = (head + "\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAd\n =AAAA\n"
-                  " -----END PGP SIGNATURE-----\n\n" + msg + "\n")
-        oid = self.g("hash-object", "-t", "commit", "-w", "--stdin", data=signed.encode())
-        self.g("update-ref", "HEAD", oid)
-        sentinel = os.path.join(self.tmp, "SENTINEL")
-        script = os.path.join(self.tmp, "gpg.sh")
-        with open(script, "w") as fh:
-            fh.write(f"#!/bin/sh\ntouch {sentinel}\nexit 1\n")
-        os.chmod(script, 0o755)
-        self.g("config", "log.showSignature", "true")
-        self.g("config", "gpg.program", script)
-        subprocess.run(["git", "log", "-1"], cwd=self.repo, env=self.env, capture_output=True)
-        self.assertTrue(os.path.exists(sentinel), "fixture must prove plain git runs gpg.program")
-        os.remove(sentinel)
-        for args in (["log", "-1", "--pretty=format:%s"], ["show", "-s", "HEAD"]):
-            with self.subTest(args=args):
-                self.assertEqual(self.ctx_git(*args).returncode, 0)
-                self.assertFalse(os.path.exists(sentinel))
-
-    def test_replace_refs_do_not_forge_history(self):
-        self.g("commit", "-q", "--allow-empty", "-m", "forged")
-        forged = self.g("rev-parse", "HEAD")
-        self.g("reset", "-q", "--hard", "HEAD~1")
-        self.g("replace", self.g("rev-parse", "HEAD"), forged)
-        self.assertEqual(self.g("log", "-1", "--pretty=format:%s"), "forged")    # the fixture is real
-        self.assertEqual(self.ctx_git("log", "-1", "--pretty=format:%s").stdout, "c2")
-        self.assertEqual(self.ctx_git("rev-list", "--count", "HEAD").stdout.strip(), "3")
-
-    def test_grafts_do_not_rewrite_ancestry(self):
-        with open(os.path.join(self.repo, ".git", "info", "grafts"), "w") as fh:
-            fh.write(self.g("rev-parse", "HEAD") + "\n")
-        self.assertEqual(self.g("rev-list", "--count", "HEAD"), "1")            # the fixture is real
-        self.assertEqual(self.ctx_git("rev-list", "--count", "HEAD").stdout.strip(), "3")
-
-
-@unittest.skipUnless(shutil.which("git", path=proc.SYSTEM_PATH), "git not installed")
-class GitInjectionRuntimeTests(unittest.TestCase):
-    """End to end: the r2 injection ran `id` through ctx.git(["-c", "alias.y=!..."]).
-    Now the call is refused, counted as a violation, and the daemon fails closed (78)."""
-
-    def run_daemon(self, source):
-        fixture = fixture_with(source, commands=["git"])
-        sb = Sandbox(fixture)
-        try:
-            repo = os.path.join(sb.home, "data", "repo")
-            subprocess.run(["git", "init", "-q", repo], check=True)
-            subprocess.run(["git", "-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit",
-                            "-q", "--allow-empty", "-m", "x"], check=True)
-            marker = os.path.join(sb.output, "pwned.txt")
-            p = sb.run(cycles=1)
-            return p, os.path.exists(marker), sb.records()
-        finally:
-            sb.cleanup()
-            shutil.rmtree(fixture)
-
-    def test_alias_injection_through_ctx_git_is_refused(self):
-        source = '''
-def sense(ctx):
-    try:
-        ctx.git("~/data/repo", ["-c", "alias.y=!id > OUT/pwned.txt", "y"])
-    except ctx.NotAllowed:
-        pass
-    return {"value": "done"}
-''' + SENSE_DECIDE
-        p, marker, records = self.run_daemon(source)
-        self.assertEqual(p.returncode, 78, p.stderr)
-        self.assertFalse(marker)
-        self.assertEqual(records[-1]["payload"]["category"], "POLICY_VIOLATION")
-
-    def test_git_through_ctx_run_is_refused(self):
-        source = '''
-def sense(ctx):
-    try:
-        ctx.run(["git", "-C", "/", "-c", "alias.x=!id", "x"])
-    except ctx.NotAllowed:
-        pass
-    return {"value": "done"}
-''' + SENSE_DECIDE
-        p, _, records = self.run_daemon(source)
-        self.assertEqual(p.returncode, 78, p.stderr)
-
-    def test_read_only_git_still_works(self):
-        source = '''
-def sense(ctx):
-    r = ctx.git("~/data/repo", ["rev-parse", "HEAD"])
-    return {"value": r.stdout.strip()}
-''' + SENSE_DECIDE
-        p, _, records = self.run_daemon(source)
-        self.assertEqual(p.returncode, 0, p.stderr)
-        observed = [r for r in records if r["event_type"] == "VALUE_OBSERVED"]
-        self.assertRegex(observed[0]["payload"]["value"], r"^[0-9a-f]{40}$")
 
 
 class PurityHardeningTests(unittest.TestCase):
@@ -363,14 +194,21 @@ class RuntimeHardeningTests(unittest.TestCase):
             sb.cleanup()
             shutil.rmtree(fixture)
 
-    def test_undeclared_command_request_fails_closed_even_when_swallowed(self):
-        source = ("def sense(ctx):\n    try:\n        ctx.run(['uptime'])\n    except Exception:\n"
-                  "        pass\n    return {'value': 1}\n" + SENSE_DECIDE)
+    def test_ctx_offers_no_way_to_run_a_program(self):
+        # Contract 5 (R-2): ctx.run and ctx.git are gone, so the r3 test that an undeclared
+        # command fails closed (test_undeclared_command_request_fails_closed_even_when_swallowed)
+        # becomes: there is nothing to request, and asking starts no process.
+        source = ("def sense(ctx):\n    found = []\n    for name in ('run', 'git'):\n        try:\n"
+                  "            ctx.run if name == 'run' else ctx.git\n            found.append(name)\n"
+                  "        except AttributeError:\n            pass\n    return {'value': ','.join(found) or 'none'}\n"
+                  + SENSE_DECIDE)
         fixture = fixture_with(source)
         sb = Sandbox(fixture)
         try:
-            p = sb.run(cycles=2)
-            self.assertEqual(p.returncode, 78, p.stderr)
+            p = sb.run(cycles=1)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            observed = [r["payload"] for r in sb.records() if r["event_type"] == "VALUE_OBSERVED"]
+            self.assertEqual(observed, [{"value": "none"}])
         finally:
             sb.cleanup()
             shutil.rmtree(fixture)
@@ -430,15 +268,18 @@ class RuntimeHardeningTests(unittest.TestCase):
             policy = guard.Policy(m)
             with self.assertRaises(AttributeError):
                 policy.deny = ()
-            with self.assertRaises(TypeError):
-                policy.commands["sh"] = "/bin/sh"
+            with self.assertRaises(AttributeError):
+                policy.reads = ("/",)
         finally:
             os.environ.pop("SPARK_DAEMON_HOME", None)
             sb.cleanup()
 
 
 class CpuAccountingTests(unittest.TestCase):
-    def test_cpu_includes_commands_the_daemon_ran(self):
+    def test_cpu_includes_any_child_process(self):
+        # A daemon runs no program since contract 5 (R-2); children are still counted so a
+        # regression that spawned one would show in DB-14. Renamed from
+        # test_cpu_includes_commands_the_daemon_ran.
         from spark_daemon import runtime
         before = runtime._cpu_us()
         subprocess.run([sys.executable, "-c", "import time\nt=time.process_time()\n"
@@ -528,7 +369,7 @@ def _rebuild(name, stamp, sections, limit):
 class CliRobustnessTests(unittest.TestCase):
     def cli(self, *args):
         return subprocess.run([sys.executable, "-I", "-B", ENTRY, *args], capture_output=True, text=True,
-                              timeout=120, env={"PATH": proc.SYSTEM_PATH, "HOME": "/nonexistent", "LANG": "C.UTF-8"})
+                              timeout=120, env={"PATH": SYSTEM_PATH, "HOME": "/nonexistent", "LANG": "C.UTF-8"})
 
     def test_verify_with_a_bad_manifest_reports_instead_of_crashing(self):
         tmp = tempfile.mkdtemp()

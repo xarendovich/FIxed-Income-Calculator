@@ -80,7 +80,7 @@ import sys
 import time
 
 from . import (DIGEST_NAME, EXIT_ALREADY_RUNNING, EXIT_LEDGER_CORRUPT, EXIT_OK, EXIT_POLICY,
-               EXIT_SENSE_BLIND, EXIT_UNCERTAIN_COMMIT, EXIT_USAGE, LOCK_NAME, TMP_DIR, TMP_PREFIX, VERSION)
+               EXIT_SENSE_BLIND, EXIT_UNCERTAIN_COMMIT, EXIT_USAGE, LOCK_NAME, TMP_PREFIX, VERSION)
 from . import guard, landlock, ledger, manifest as manifest_mod, notify as notify_mod, purity, render, semantics
 from .canonical import CanonicalError, sha256_hex, to_json_value
 from .context import Context, CycleBudgetExceeded, Unsettled, utc_now
@@ -113,18 +113,10 @@ def _exception_name(exc) -> str:
     return name if name.isidentifier() and len(name) <= EXCEPTION_NAME_MAX else "Exception"
 
 
-def _tool_versions(policy, step_timeout):
-    versions = {"python": sys.version.split()[0], "kernel": os.uname().release, "git": None}
-    if "git" in policy.commands:
-        from . import proc
-        try:
-            result = proc.run(["git", "--version"], executables=policy.commands,
-                              timeout=step_timeout, max_bytes=256)
-            if result.returncode == 0:
-                versions["git"] = result.stdout.strip()[:64]
-        except Exception:  # noqa: BLE001 - a version probe must never stop the daemon
-            pass
-    return versions
+def _tool_versions():
+    """What DAEMON_START records about the interpreter and kernel. v5 (R-2): no Git probe, since
+    a daemon runs no program."""
+    return {"python": sys.version.split()[0], "kernel": os.uname().release}
 
 
 def _load_module(path):
@@ -244,7 +236,7 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
         return EXIT_POLICY
 
     guard.remove_stray_temp_files(out)
-    tool_versions = _tool_versions(policy, cycle_budget)
+    tool_versions = _tool_versions()
     # Landlock (r2, AP-01) before the audit hook: the hook's own blocked events include
     # ctypes, which this step still needs. A kernel too old or without Landlock is a
     # start-up refusal outside test mode (PD-15), so the self-tests and the battery still
@@ -277,7 +269,7 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
     stop = _Stop()
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    ctx = Context(policy, cycle_budget=cycle_budget, tmp_dir=os.path.join(out, TMP_DIR))
+    ctx = Context(policy)
     signal.signal(signal.SIGALRM, _over_budget)
     recent = collections.deque(maxlen=RECENT_RECORDS)
     ping_every = max(0.2, min(1.0, m.watchdog_seconds / 4))
@@ -342,12 +334,12 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
             stage = "sense"
             error = unsettled = None
             prepared = snapshot = None
-            # r4.11 (R-6): one monotonic deadline per cycle, set here. Every ctx call gets what is
-            # left of it, and an alarm interrupts sense() and decide() at the deadline, including
-            # pure-Python loops and blocking reads the kernel lets a signal interrupt. The alarm is
-            # off while the ledger is written, so a commit is never cut short.
+            # r4.11 (R-6): one monotonic deadline per cycle, set here. v5 (E-2): the alarm is its
+            # only in-process enforcer. It interrupts sense() and decide() at the deadline,
+            # including pure-Python loops and blocking reads the kernel lets a signal interrupt,
+            # and is off while the ledger is written, so a commit is never cut short. The watchdog,
+            # derived from the same budget, is the outer backstop.
             deadline = time.monotonic() + cycle_budget
-            ctx._begin_cycle(deadline)
             try:
                 try:
                     _alarm(cycle_budget)
@@ -395,7 +387,6 @@ def run(manifest_path: str, max_cycles: int | None = None, expect: dict | None =
                         # The cycle's events are committed; only the view is late. The previous
                         # digest stays, with its older stamp.
                         log("digest not refreshed: the cycle budget ran out")
-            ctx._end_cycle()
 
             # Counts violations even if the daemon's own code caught and ignored the exception.
             if guard.VIOLATIONS["count"] != violations_seen:
@@ -487,8 +478,8 @@ def _alarm(seconds: float) -> None:
 
 
 def _cpu_us() -> int:
-    """CPU of this process plus every command it ran (ctx.run, ctx.git). r2 counted only
-    RUSAGE_SELF, so a daemon that did its work in child processes looked free to DB-14."""
+    """CPU of this process, plus any children (none since v5, R-2: kept so a regression that
+    spawned one would still be counted by DB-14)."""
     total = 0.0
     for who in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN):
         usage = resource.getrusage(who)

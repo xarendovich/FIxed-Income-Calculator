@@ -24,15 +24,15 @@ from . import (BATTERY_SCHEMA, DIGEST_NAME, EXIT_ALREADY_RUNNING, EXIT_LEDGER_CO
                EXIT_POLICY, EXIT_UNCERTAIN_COMMIT, EXIT_USAGE, KNOWN_OUTPUT_ENTRIES, LEDGER_NAME,
                LEDGER_SCHEMA, MANIFEST_SCHEMA, RESERVED_EVENT_TYPES, VERSION)
 from . import manifest as mf
-from . import proc, purity, render, unitgen
+from . import purity, render, unitgen
 from .canonical import MAX_SAFE_INT, canonical_bytes, sha256_hex
 
 CONTRACT_SCHEMA = "spark-daemon-contract/1"
-CONTRACT_VERSION = "4.0.0"
+CONTRACT_VERSION = "5.0.0-dev"     # v5 cuts in progress; "5.0.0" and its digest are recorded at the last cut
 CANDIDATE_SCHEMA = "spark-daemon-candidate/1"
 VALIDATE_SCHEMA = "spark-daemon-validate/2"
 PRECHECK_SCHEMA = "spark-daemon-precheck/2"
-MANIFEST_SCHEMA_ID = "urn:spark:schema:spark-daemon-manifest:3"
+MANIFEST_SCHEMA_ID = "urn:spark:schema:spark-daemon-manifest:4"
 
 AUTHORITY = (
     "A candidate carries no authority. Whoever or whatever produced it - a person, a script "
@@ -81,8 +81,6 @@ def manifest_json_schema() -> dict:
     to mean the same in Python's re and ECMA-262 (the validator uses fullmatch)."""
     int_range = lambda low, high, desc: {"type": "integer", "minimum": low, "maximum": high,  # noqa: E731
                                          "description": desc}
-    forbidden = sorted(mf.FORBIDDEN_COMMANDS)
-    prefixes = "|".join(mf.FORBIDDEN_COMMAND_PREFIXES)
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": MANIFEST_SCHEMA_ID,
@@ -116,12 +114,6 @@ def manifest_json_schema() -> dict:
                       "items": {"$ref": "#/$defs/path"},
                       "description": "What ctx may read, and all it may read: none inside, and none "
                                      "containing, a base-deny path."},
-            "commands": {
-                "type": "array", "maxItems": 8, "uniqueItems": True,
-                "items": {"type": "string", "pattern": _anchored(mf.COMMAND_RE.pattern),
-                          "not": {"anyOf": [{"enum": forbidden}, {"pattern": f"^({prefixes})"}]}},
-                "description": "Bare command names ctx.run may execute ('git' only via ctx.git).",
-            },
             "output_dir": {"$ref": "#/$defs/path"},
             "network": {"type": "object", "additionalProperties": False, "required": ["mode"],
                         "properties": {"mode": {"enum": ["none"],
@@ -218,14 +210,14 @@ def ctx_capabilities() -> dict:
                for name, fn in inspect.getmembers(context.Context, predicate=inspect.isfunction)
                if not name.startswith("_")]
     results = []
-    for cls in (context.StatInfo, context.DiskUsage, context.Listing, proc.RunResult):
+    for cls in (context.StatInfo, context.DiskUsage, context.Listing):
         fields = [{"name": k, "type": _type_name(v)} for k, v in cls.__annotations__.items()]
         results.append({"name": cls.__name__, "fields": fields})
     exceptions = [{"name": f"ctx.{cls.__name__}", "summary": _first_line(cls)}
                   for cls in (context.Missing, context.TooLarge, context.NotAllowed)]
     return {"methods": methods, "results": results, "exceptions": exceptions,
-            "writes": "none: ctx has no method that writes, deletes, sends or executes anything "
-                      "outside the manifest's commands"}
+            "writes": "none: ctx has no method that writes, deletes, sends or executes anything",
+            "programs": "none: a daemon runs no program (contract 5, R-2); the kernel grants execute nowhere"}
 
 
 def _evidence() -> dict:
@@ -264,8 +256,6 @@ def contract_body() -> dict:
             "max_bytes": mf.MANIFEST_MAX_BYTES,
             "base_deny": list(mf.BASE_DENY),
             "forbidden_output_roots": list(mf.FORBIDDEN_OUTPUT_ROOTS),
-            "forbidden_commands": sorted(mf.FORBIDDEN_COMMANDS),
-            "forbidden_command_prefixes": list(mf.FORBIDDEN_COMMAND_PREFIXES),
             "reserved": {"daemon_class": ["act"], "trigger.kind": ["inotify-wakeup"],
                          "network.mode": ["named"]},
             "cross_field_rules": list(CROSS_FIELD_RULES),
@@ -337,20 +327,6 @@ def contract_body() -> dict:
                                   "requires an Act-family class, the supervisor/worker split (PD-72) and "
                                   "pre-authorized survival actions",
             },
-        },
-        "git": {
-            "via": "ctx.git(repo, args, max_bytes=65536, index_copy=False); ctx.run(['git', ...]) is refused",
-            "subcommands": sorted(proc.GIT_SUBCOMMANDS),
-            "diff_subcommands_forced_flags": {"subcommands": sorted(proc.GIT_DIFF_SUBCOMMANDS),
-                                              "flags": ["--no-ext-diff", "--no-textconv"]},
-            "refused_long_options": list(proc.GIT_REFUSED_OPTIONS),
-            "refused_short_options": {k: list(v) for k, v in sorted(proc.GIT_REFUSED_SHORT.items())},
-            "other_rules": ["the subcommand is always the first argument",
-                            "no argument may be absolute, start with '~' or contain a '..' segment",
-                            "no %G signature placeholders in --format/--pretty",
-                            "safe.directory is set to exactly the declared repository"],
-            "global_options_always_set": list(proc.GIT_BASE),
-            "environment_always_set": dict(sorted(proc.GIT_ENV.items())),
         },
         "digest": {
             "label_pattern": render.LABEL_RE.pattern,

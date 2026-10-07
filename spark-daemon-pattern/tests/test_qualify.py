@@ -13,9 +13,9 @@ import unittest
 from types import SimpleNamespace
 
 from helpers import ENTRY, EXAMPLE, FIXTURES, ROOT, Sandbox
-from spark_daemon import EXIT_POLICY, EXIT_USAGE, proc, qualify, unitgen
+from spark_daemon import EXIT_POLICY, EXIT_USAGE, SYSTEM_PATH, qualify, unitgen
 
-ENV = {"PATH": proc.SYSTEM_PATH, "HOME": "/nonexistent", "LANG": "C.UTF-8"}
+ENV = {"PATH": SYSTEM_PATH, "HOME": "/nonexistent", "LANG": "C.UTF-8"}
 OPTIONS = ["--part-of", "project-stack.service", "--require-path", "/mnt/project/.volume-marker"]
 
 
