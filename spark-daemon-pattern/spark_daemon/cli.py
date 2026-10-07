@@ -1,6 +1,6 @@
 """Command line.
 
-Authoring and handoff: describe | schema | scaffold | envelope
+The contract: describe | schema    (authoring: bin/spark-daemon-author scaffold | envelope)
 Evidence: precheck (static) | validate (+ a short confined run) | battery (qualifies), one report shape
 Operation: unit (--report: the installable unit; --manifest: a preview) | run | verify | status
 Harness (the battery and the self-tests): harness, with explicit, recorded parameters
@@ -15,7 +15,38 @@ import sys
 from . import EXIT_FAILED, EXIT_OK, EXIT_USAGE, VERSION
 
 
+MOVED = {
+    "verify": "removed in contract 5 (E-9): use `spark-daemon status --verify-only --manifest M`, which prints "
+              "the same line and RESULT, from the independent verifier cross-checked against the primary one",
+    "scaffold": "moved in contract 5 (E-9) to the authoring tool: `spark-daemon-author scaffold ...`",
+    "envelope": "moved in contract 5 (E-9) to the authoring tool: `spark-daemon-author envelope ...`",
+}
+
+
+def _print_verification(report, as_json) -> int:
+    """status --verify-only: `verify`'s line and RESULT, or the report as JSON."""
+    integrity = report["integrity"]
+    if as_json:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+    elif integrity == "NO_LEDGER":
+        print("no ledger yet")
+    elif integrity == "CHAIN_INTACT":
+        facts = report["verification"]
+        print(json.dumps({"seq": facts["head_seq"], "chain_head_sha256": facts["head_sha256"],
+                          "torn_tail_bytes": facts["torn_tail"]["length"] if facts["torn_tail"] else 0}))
+    else:
+        print(report.get("reason") or "; ".join(report.get("disagreement", [])))
+    ok = integrity in ("NO_LEDGER", "CHAIN_INTACT")
+    if not as_json:
+        print("RESULT: PASS" if ok else "RESULT: FAIL")
+    return EXIT_OK if ok else EXIT_FAILED
+
+
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] in MOVED:        # contract 5 (E-9): say where it went, for one release
+        print(f"spark-daemon {argv[0]}: {MOVED[argv[0]]}", file=sys.stderr)
+        return EXIT_USAGE
     parser = argparse.ArgumentParser(prog="spark-daemon", description=f"Spark daemon pattern {VERSION} (draft)")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -23,18 +54,6 @@ def main(argv=None) -> int:
     p.add_argument("--identity", action="store_true", help="print only contract_version and contract_sha256")
 
     sub.add_parser("schema", help="print the manifest JSON Schema (draft 2020-12)")
-
-    p = sub.add_parser("scaffold", help="write a starting manifest.json, daemon.py and candidate.json")
-    p.add_argument("--name", required=True)
-    p.add_argument("--dir", required=True)
-    p.add_argument("--purpose", default=None)
-    p.add_argument("--unit", choices=("system", "user"), default="system")
-
-    p = sub.add_parser("envelope", help="write candidate.json for the manifest.json and daemon.py in a folder")
-    p.add_argument("--dir", required=True)
-    p.add_argument("--producer-kind", required=True, choices=("human", "script", "model"))
-    p.add_argument("--producer-id", required=True)
-    p.add_argument("--intent", required=True)
 
     p = sub.add_parser("precheck", help="the static checks: manifest, purity, envelope, unit (milliseconds; no process is started)")
     p.add_argument("--manifest", required=True)
@@ -78,13 +97,12 @@ def main(argv=None) -> int:
     p.add_argument("--audit", choices=("enforce", "record"), default="enforce",
                    help="record: the audit hook counts but never blocks (DB-03, DB-17)")
 
-    p = sub.add_parser("verify", help="verify a daemon's ledger read-only and print its chain head")
-    p.add_argument("--manifest", required=True)
-    p.add_argument("--output-dir", default=None, help=argparse.SUPPRESS)    # the battery's harness override
-
     p = sub.add_parser("status", help="a daemon's state from its ledger, verified independently (r4.11)")
     p.add_argument("--manifest", required=True)
     p.add_argument("--json", action="store_true")
+    p.add_argument("--verify-only", action="store_true",
+                   help="verify the ledger and print its chain head; interpret nothing (was `verify`)")
+    p.add_argument("--output-dir", default=None, help=argparse.SUPPRESS)    # the battery's harness override
 
     p = sub.add_parser("battery", help="run the conformance battery in a disposable workspace (the qualifying profile)")
     p.add_argument("--manifest", required=True)
@@ -125,33 +143,6 @@ def main(argv=None) -> int:
     if args.command == "schema":
         from . import contract
         print(json.dumps(contract.manifest_json_schema(), indent=2, ensure_ascii=False))
-        return EXIT_OK
-
-    if args.command == "scaffold":
-        from . import scaffold
-        try:
-            written = scaffold.scaffold(args.dir, name=args.name, purpose=args.purpose, unit=args.unit)
-        except (ValueError, FileExistsError) as e:
-            print(f"scaffold: {e}", file=sys.stderr)
-            return EXIT_USAGE
-        for path in written:
-            print(path)
-        return EXIT_OK
-
-    if args.command == "envelope":
-        from . import handoff
-        try:
-            env = handoff.make_envelope(args.dir, producer_kind=args.producer_kind,
-                                        producer_id=args.producer_id, intent=args.intent)
-        except (ValueError, OSError) as e:
-            print(f"envelope: {e}", file=sys.stderr)
-            return EXIT_USAGE
-        path = os.path.join(args.dir, handoff.ENVELOPE_NAME)
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(env, fh, indent=2)
-            fh.write("\n")
-        print(path)
-        print(f"envelope sha256 {handoff.envelope_sha256(env)}")
         return EXIT_OK
 
     if args.command in ("precheck", "validate"):
@@ -212,11 +203,21 @@ def main(argv=None) -> int:
         from . import EXIT_FLAGGED, status
         from . import manifest as manifest_mod
         try:
-            report = status.status(args.manifest)
+            if args.verify_only:
+                report = status.verify_only(args.manifest, output_dir=args.output_dir)
+            else:
+                report = status.status(args.manifest, output_dir=args.output_dir)
         except manifest_mod.ManifestError as e:
+            if args.verify_only:            # as `verify` did, so its callers need only the new name
+                for problem in e.problems:
+                    print(f"manifest: {problem}")
+                print("RESULT: FAIL")
+                return EXIT_FAILED
             for problem in e.problems:
                 print(f"manifest: {problem}", file=sys.stderr)
             return EXIT_USAGE
+        if args.verify_only:
+            return _print_verification(report, args.json)
         if args.json:
             print(json.dumps(report, indent=2, ensure_ascii=False))
         else:
@@ -231,32 +232,6 @@ def main(argv=None) -> int:
         if report["integrity"] == "CORRUPT":
             return EXIT_FAILED
         return EXIT_OK if report["state"] == "observing" else EXIT_FLAGGED
-
-    if args.command == "verify":
-        from . import LEDGER_NAME, ledger, manifest
-        from .paths import expand
-        try:
-            m = manifest.load(args.manifest)
-        except manifest.ManifestError as e:
-            for problem in e.problems:
-                print(f"manifest: {problem}")
-            print("RESULT: FAIL")
-            return EXIT_FAILED
-        path = os.path.join(expand(args.output_dir or m.output_dir), LEDGER_NAME)
-        try:
-            result = ledger.verify_file(path, m.name, m.ledger.record_max_bytes)
-        except FileNotFoundError:
-            print("no ledger yet")
-            print("RESULT: PASS")
-            return EXIT_OK
-        except ledger.LedgerCorrupt as e:
-            print(str(e))
-            print("RESULT: FAIL")
-            return EXIT_FAILED
-        print(json.dumps({"seq": result.tail.seq, "chain_head_sha256": result.tail.head,
-                          "torn_tail_bytes": result.torn.length if result.torn else 0}))
-        print("RESULT: PASS")
-        return EXIT_OK
 
     if args.command == "battery":
         from . import battery

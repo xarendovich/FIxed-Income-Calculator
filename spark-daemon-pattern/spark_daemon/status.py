@@ -9,6 +9,10 @@ Consumers (notifiers, timers, other projects) should read a daemon through this 
 verifier, not by parsing the ledger themselves (N-19).
 
 cross_check() runs both verifiers over one file and lists where they disagree (DB-22).
+
+Since contract 5 (E-9) `verify` is `status --verify-only`: verification without interpretation,
+by the same independent verifier, cross-checked against the primary one. A reader therefore
+always meets the same verification.
 """
 
 import datetime
@@ -71,9 +75,29 @@ def cross_check(path, daemon, max_bytes) -> list:
             for key in sorted(set(a) | set(b)) if a.get(key) != b.get(key)]
 
 
-def status(manifest_path, at: semantics.Now | None = None) -> dict:
+def verify_only(manifest_path, output_dir=None) -> dict:
+    """The ledger's integrity and chain head, interpreted not at all. integrity is NO_LEDGER,
+    CHAIN_INTACT, CORRUPT, or VERIFIERS_DISAGREE (a defect in one of them: never healthy)."""
     m = manifest_mod.load(manifest_path)
-    path = os.path.join(expand(m.output_dir), LEDGER_NAME)
+    path = os.path.join(expand(output_dir or m.output_dir), LEDGER_NAME)
+    facts = load_verifier().verify(path, m.name, m.ledger.record_max_bytes)
+    report = {"schema": STATUS_SCHEMA, "daemon": m.name, "ledger": path, "verification": facts}
+    disagreement = [] if facts.get("missing") else cross_check(path, m.name, m.ledger.record_max_bytes)
+    if facts.get("missing"):
+        report["integrity"] = "NO_LEDGER"
+    elif disagreement:
+        report.update(integrity="VERIFIERS_DISAGREE", disagreement=disagreement)
+    elif not facts["intact"]:
+        report.update(integrity="CORRUPT",
+                      reason=f"{facts['break']['category']} at seq {facts['break']['seq']}")
+    else:
+        report["integrity"] = "CHAIN_INTACT"
+    return report
+
+
+def status(manifest_path, at: semantics.Now | None = None, output_dir=None) -> dict:
+    m = manifest_mod.load(manifest_path)
+    path = os.path.join(expand(output_dir or m.output_dir), LEDGER_NAME)
     facts = load_verifier().verify(path, m.name, m.ledger.record_max_bytes, keep_records=True)
     report = {"schema": STATUS_SCHEMA, "daemon": m.name, "ledger": path,
               "blind_limit_seconds": m.blind_limit_seconds,

@@ -212,7 +212,7 @@ class EnvelopeTests(unittest.TestCase):
         r = self.report()
         self.assertTrue(r["valid"], r["diagnostics"])
         self.assertEqual(r["candidate"]["contract_match"], "exact")
-        self.assertEqual(r["candidate"]["producer"], {"kind": "script", "id": "spark-daemon scaffold"})
+        self.assertEqual(r["candidate"]["producer"], {"kind": "script", "id": "spark-daemon-author scaffold"})
 
     def test_a_candidate_cannot_certify_itself(self):
         for key, value in (("battery_result", "PASS"), ("approved", True), ("verdict", "ok"),
@@ -258,8 +258,15 @@ class EnvelopeTests(unittest.TestCase):
         self.assertFalse(self.report()["valid"])
 
     def test_envelope_cli_round_trip(self):
-        p = cli("envelope", "--dir", self.dir, "--producer-kind", "model", "--producer-id", "generator-v0 run 7",
-                "--intent", "Watches the host name as a handoff round-trip test.")
+        # Contract 5 (E-9): envelope is in the authoring tool, spark-daemon-author.
+        args = ["envelope", "--dir", self.dir, "--producer-kind", "model", "--producer-id", "generator-v0 run 7",
+                "--intent", "Watches the host name as a handoff round-trip test."]
+        moved = cli(*args)
+        self.assertEqual(moved.returncode, 2)
+        self.assertIn("spark-daemon-author envelope", moved.stderr)
+        p = subprocess.run([sys.executable, "-I", "-B", os.path.join(ROOT, "bin", "spark-daemon-author"), *args],
+                           capture_output=True, text=True, timeout=60,
+                           env={"PATH": SYSTEM_PATH, "HOME": "/nonexistent", "LANG": "C.UTF-8"})
         self.assertEqual(p.returncode, 0, p.stderr)
         r = self.report()
         self.assertTrue(r["valid"], r["diagnostics"])

@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""spark-daemon-author: the authoring tool (contract 5, E-9); entry point that works under `python3 -I -B` (isolated, no bytecode)."""
+import os
+import sys
+
+sys.dont_write_bytecode = True
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from spark_daemon.author import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

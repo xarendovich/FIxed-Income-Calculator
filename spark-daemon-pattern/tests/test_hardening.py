@@ -369,18 +369,51 @@ class CliRobustnessTests(unittest.TestCase):
         return subprocess.run([sys.executable, "-I", "-B", ENTRY, *args], capture_output=True, text=True,
                               timeout=120, env={"PATH": SYSTEM_PATH, "HOME": "/nonexistent", "LANG": "C.UTF-8"})
 
-    def test_verify_with_a_bad_manifest_reports_instead_of_crashing(self):
+    def test_verify_only_with_a_bad_manifest_reports_instead_of_crashing(self):
+        # Contract 5 (E-9): `verify` is `status --verify-only`; was
+        # test_verify_with_a_bad_manifest_reports_instead_of_crashing.
         tmp = tempfile.mkdtemp()
         try:
             path = os.path.join(tmp, "manifest.json")
             with open(path, "w") as fh:
                 fh.write('{"name": "x"}')
-            p = self.cli("verify", "--manifest", path)
+            p = self.cli("status", "--verify-only", "--manifest", path)
             self.assertEqual(p.returncode, 1)
             self.assertNotIn("Traceback", p.stderr)
             self.assertIn("RESULT: FAIL", p.stdout)
         finally:
             shutil.rmtree(tmp)
+
+    def test_verify_only_prints_what_verify_printed(self):
+        # Contract 5 (E-9): one reader. status --verify-only keeps verify's line and RESULT, so a
+        # caller changes only the command; a corrupt ledger is still FAIL, exit 1.
+        sb = Sandbox("counter")
+        try:
+            sb.write("data/value.txt", "x")
+            self.assertEqual(sb.run(cycles=2).returncode, 0)
+            p = sb.cli("status", "--verify-only", "--manifest", sb.manifest)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            line, result = p.stdout.strip().splitlines()
+            head = json.loads(line)
+            self.assertEqual(sorted(head), ["chain_head_sha256", "seq", "torn_tail_bytes"])
+            self.assertEqual((head["seq"], result), (len(sb.records()), "RESULT: PASS"))
+            data = bytearray(sb.ledger_bytes())
+            data[20] = ord("#")
+            with open(sb.ledger_path, "wb") as fh:
+                fh.write(data)
+            p = sb.cli("status", "--verify-only", "--manifest", sb.manifest)
+            self.assertEqual(p.returncode, 1)
+            self.assertTrue(p.stdout.strip().endswith("RESULT: FAIL"))
+        finally:
+            sb.cleanup()
+
+    def test_moved_commands_say_where_they_went(self):
+        for name, where in (("verify", "status --verify-only"), ("scaffold", "spark-daemon-author scaffold"),
+                            ("envelope", "spark-daemon-author envelope")):
+            with self.subTest(command=name):
+                p = self.cli(name, "--manifest", "x")
+                self.assertEqual(p.returncode, 2)
+                self.assertIn(where, p.stderr)
 
     def test_battery_with_invalid_json_reports_instead_of_crashing(self):
         tmp = tempfile.mkdtemp()

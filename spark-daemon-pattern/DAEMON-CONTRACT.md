@@ -69,7 +69,7 @@ A candidate is a folder: `manifest.json`, `daemon.py` and, from a script or a mo
 - **Contract match:** `exact` (same version and sha) passes. `compatible` (same major, different minor) passes with a warning, validated against the running rules. `mismatch` (same version, different sha) and `incompatible` (different major) fail.
 - **Producer:** `human`, `script` or `model`, plus a free-text id. This is provenance only. It does not change what is checked or who decides.
 
-`spark-daemon envelope --dir D --producer-kind model --producer-id "..." --intent "..."` writes one. `scaffold` writes a starting folder with one.
+`spark-daemon-author envelope --dir D --producer-kind model --producer-id "..." --intent "..."` writes one. `spark-daemon-author scaffold` writes a starting folder with one. (Contract 5 moved both out of the runtime CLI, E-9.)
 
 ## 5. The authority rule
 
@@ -78,6 +78,19 @@ Stated once, and embedded verbatim in the contract (`authority`); every report c
 > A candidate carries no authority. Whoever or whatever produced it - a person, a script or a model - it cannot certify itself: validate and precheck are fast feedback, the conformance battery's PASS is the only admissible evidence, and activation remains a human Class C decision. A producer is never granted authority that no one adjudicated.
 
 This is the discipline the project already applies to daemon *content*, applied identically to whatever *produces* daemon content. The same scope-control rule holds as in Step 9: the pattern exposes what a producer needs in order to be checked, and never gives a producer a way to reach activation, the decision log, the contract itself, or the battery's verdict.
+
+## 5a. The six invariants (contract 5)
+
+No change may relax any of these. Each is enforced in one place; the checks and tests named with it fail if it breaks. They are published in the contract (`contract.invariants`), with the self-tests that hold each one; `tests/test_invariants.py` fails if a named check or test stops existing. They replace the owner's eight and r4.9's INV-1 to INV-9 (E-8, `ADJUDICATION-V5.md`). The owner's eighth ("nothing relaxes confinement, blindness, authentication, or proposal-versus-authority") is the preamble.
+
+| ID | Invariant | Enforced in | Battery checks | Absorbs |
+| --- | --- | --- | --- | --- |
+| I-1 | Observe only, and the kernel enforces it: no network, no program, writes only in output_dir, reads only the declared paths, under one path policy for every layer | Landlock and the systemd unit, both projected from pathpolicy.PathPolicy; purity and the audit hook are diagnostics and a tripwire | DB-15, DB-17, DB-18 | owner 2, owner 3, INV-1, INV-2 |
+| I-2 | Never record a guess: only an accepted cycle produces events; an unsettled, truncated or failed read abandons the cycle | the runtime's cycle (runtime.py), with ctx raising on truncation | DB-04 | INV-3 |
+| I-3 | Blindness surfaces within blind_limit_seconds, across restarts and clock steps, and is never restarted away | semantics.blindness, the one function the runtime and status use | DB-20 | INV-4 |
+| I-4 | The ledger is the one source of truth: append-only and hash-chained, verified two independent ways, interpreted once; integrity uncertainty and every gap are visible, never rendered healthy | ledger.py writes; ledger.py and verifier/ledger_verify.py verify; semantics.interpret interprets | DB-04, DB-06, DB-07, DB-16, DB-22 | owner 4, owner 5, INV-5, INV-6 |
+| I-5 | It runs only what was judged, and judging is not activation: the installable unit is a projection of a qualifying report made on this host, the runtime refuses files that differ from the unit's digests, and nothing here installs or enables a unit | judge.conclusions and `unit --report` when installing; the runtime's digest gate at every start | DB-24 | owner 1, owner 7, INV-7 |
+| I-6 | Bounded: one budget for each whole cycle, every unit timing derived from it, and restart decided by the exit class | the cycle's alarm (runtime.py); timings derived from cycle_budget_seconds (manifest.py, unitgen.py); RestartPreventExitStatus from NO_RESTART_EXIT_CODES | DB-14, DB-25 | owner 6, INV-8, INV-9 |
 
 ## 6. Three lanes of evidence
 
@@ -96,8 +109,8 @@ The battery quotes the envelope as well. An envelope that does not match the fil
 Nothing here builds that subsystem. This is the protocol it would follow, so its boundary is settled before it exists:
 
 1. `describe` → keep `contract_version` and `contract_sha256`. Read `contract.code` and `contract.ctx`: that is the whole interface.
-2. `scaffold --name N --dir D` → a folder that already passes the battery 18/18. Edit only `daemon.py` and the manifest's `purpose`, `reads`, `trigger`, `ledger.event_types`, `digest`. Imitate the closest reference daemon (table below).
-3. `envelope --producer-kind model --producer-id <run id>` after every edit.
+2. `spark-daemon-author scaffold --name N --dir D` → a folder that already passes the battery. Edit only `daemon.py` and the manifest's `purpose`, `reads`, `trigger`, `ledger.event_types`, `digest`. Imitate the closest reference daemon (table below).
+3. `spark-daemon-author envelope --producer-kind model --producer-id <run id>` after every edit.
 4. `precheck --json --envelope` until `RESULT: PASS`. Diagnostics carry `layer`, `where` (manifest field or `daemon.py`) and `line`.
 5. `validate --envelope` until `RESULT: PASS`.
 6. `battery --envelope` once. The report goes to a human, with the envelope, the diff against the closest reference daemon, and the install plan (`unit --plan`).

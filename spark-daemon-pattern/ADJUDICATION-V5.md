@@ -3,7 +3,7 @@
 - **Asked:** the owner asked Claude to review and adjudicate a set of recommendations, made after the r4.11 design review, to reduce the eleven seams to about six intentional boundaries. The owner then authorized the cuts, in a fixed order and with stop conditions (§4).
 - **Authority:** the owner's authorization covers the cuts listed in §4. The verdicts below are Claude's, subject to the owner. Where a verdict modifies a recommendation, the modification is stated with its evidence.
 - **Baseline:** `a3599fd`: 267 of 267 self-tests (`evidence/v5/tests-baseline-a3599fd.txt`); four reference daemons × 22 of 22 battery checks; contract 4.0.0.
-- **Revision:** r4.12, 2026-10-07, by Claude.
+- **Revision:** r4.12, 2026-10-07, by Claude. **Implemented** in five commits (`4f0db7d`, `bf4c0e4`, `9f9cf56`, `1185daa`, and the contract 5.0.0 commit); see `REVIEW-PACKAGE-V5.md` and `evidence/v5/`.
 
 ## 1. Verdicts
 

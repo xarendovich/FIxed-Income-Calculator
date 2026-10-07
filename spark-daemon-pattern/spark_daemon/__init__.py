@@ -8,7 +8,8 @@ carries no authority. Nothing in this package installs, enables or starts a serv
 unit generator only prints text for a human to review.
 """
 
-VERSION = "0.3.0"
+# The skeleton (this implementation), not the contract: 0.3.0 from r3 to r4.11, 0.5.0 with contract 5.
+VERSION = "0.5.0"
 
 MANIFEST_SCHEMA = "spark-daemon-manifest/4"
 # The PATH given to the tools the battery runs (strace, systemd-analyze). Since v5 (R-2) the

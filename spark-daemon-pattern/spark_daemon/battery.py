@@ -679,12 +679,13 @@ def db16(ws, c):
     with open(ws.ledger, "rb") as fh:
         before = fh.read()
     mtime = os.stat(ws.ledger).st_mtime_ns
-    outs = [run_proc(ws.probe("verify"), ws.env()) for _ in range(2)]
+    # Contract 5 (E-9): the reader command is `status --verify-only` (was `verify`).
+    outs = [run_proc(ws.probe("status", "--verify-only"), ws.env()) for _ in range(2)]
     with open(ws.ledger, "rb") as fh:
         after = fh.read()
     problems = []
     if any(o.code != 0 for o in outs):
-        problems.append("verify failed")
+        problems.append("status --verify-only failed")
     if outs[0].stdout != outs[1].stdout:
         problems.append("two verifications disagree")
     if before != after or os.stat(ws.ledger).st_mtime_ns != mtime:

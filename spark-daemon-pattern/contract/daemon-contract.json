@@ -1,8 +1,8 @@
 {
   "schema": "spark-daemon-contract/1",
-  "contract_version": "5.0.0-dev",
-  "contract_sha256": "f24b61333f48c6dfcf6633aa8427eac3fbbba5216c86873bb3ed212cd3bf9222",
-  "skeleton_version": "0.3.0",
+  "contract_version": "5.0.0",
+  "contract_sha256": "2d080b407b6c82b230563670746f4a615b2c96660ec68f4509574562c282001d",
+  "skeleton_version": "0.5.0",
   "contract": {
     "manifest": {
       "schema_id": "urn:spark:schema:spark-daemon-manifest:4",
@@ -369,7 +369,7 @@
       "heartbeat": "DAEMON_HEARTBEAT every blind_limit_seconds / 2: mode (observing or blind), last_accepted_utc (null before the first accepted cycle), blind_ms, and the accepted, unsettled and failed cycle counts since the previous heartbeat, and the boot stamp (boot_id, boottime_ms, blind_since_boottime_ms)",
       "blind_forester": {
         "observe": "fail closed: SENSE_BLIND, exit 78, never restarted (the only class in this contract)",
-        "active_classes": "a pre-validated survival loop (PD-01.9) is not available in contract 4.x; it requires an Act-family class, the supervisor/worker split (PD-72) and pre-authorized survival actions"
+        "active_classes": "a pre-validated survival loop (PD-01.9) is not available in contract 5; it requires an Act-family class, the supervisor/worker split (PD-72) and pre-authorized survival actions"
       }
     },
     "digest": {
@@ -415,6 +415,120 @@
         65,
         73,
         78
+      ]
+    },
+    "invariants": {
+      "preamble": "No change may relax any of these. Each is enforced in one place; the checks and tests named with it fail if it breaks.",
+      "list": [
+        {
+          "id": "I-1",
+          "invariant": "Observe only, and the kernel enforces it: no network, no program, writes only in output_dir, reads only the declared paths, under one path policy for every layer",
+          "absorbs": [
+            "owner 2",
+            "owner 3",
+            "INV-1",
+            "INV-2"
+          ],
+          "enforced_in": "Landlock and the systemd unit, both projected from pathpolicy.PathPolicy; purity and the audit hook are diagnostics and a tripwire",
+          "checks": [
+            "DB-15",
+            "DB-17",
+            "DB-18"
+          ],
+          "tests": [
+            "test_pathpolicy.AgreementTests.test_the_three_projections_agree_on_every_shipped_manifest",
+            "test_landlock.EnforcementTests.test_nothing_the_daemon_can_write_or_merely_reads_can_be_executed"
+          ]
+        },
+        {
+          "id": "I-2",
+          "invariant": "Never record a guess: only an accepted cycle produces events; an unsettled, truncated or failed read abandons the cycle",
+          "absorbs": [
+            "INV-3"
+          ],
+          "enforced_in": "the runtime's cycle (runtime.py), with ctx raising on truncation",
+          "checks": [
+            "DB-04"
+          ],
+          "tests": [
+            "test_blind.BlindPeriodTests.test_unsettled_is_neither_an_event_nor_an_error",
+            "test_blind.DirWatchCapacityTests.test_adding_a_file_over_the_cap_never_reports_a_removal"
+          ]
+        },
+        {
+          "id": "I-3",
+          "invariant": "Blindness surfaces within blind_limit_seconds, across restarts and clock steps, and is never restarted away",
+          "absorbs": [
+            "INV-4"
+          ],
+          "enforced_in": "semantics.blindness, the one function the runtime and status use",
+          "checks": [
+            "DB-20"
+          ],
+          "tests": [
+            "test_blind.BlindPeriodTests.test_always_unsettled_stops_at_the_limit",
+            "test_blind.BlindPeriodTests.test_blindness_survives_a_restart_loop",
+            "test_blind.BlindPeriodTests.test_a_backward_clock_step_does_not_hide_blindness"
+          ]
+        },
+        {
+          "id": "I-4",
+          "invariant": "The ledger is the one source of truth: append-only and hash-chained, verified two independent ways, interpreted once; integrity uncertainty and every gap are visible, never rendered healthy",
+          "absorbs": [
+            "owner 4",
+            "owner 5",
+            "INV-5",
+            "INV-6"
+          ],
+          "enforced_in": "ledger.py writes; ledger.py and verifier/ledger_verify.py verify; semantics.interpret interprets",
+          "checks": [
+            "DB-04",
+            "DB-06",
+            "DB-07",
+            "DB-16",
+            "DB-22"
+          ],
+          "tests": [
+            "test_independent.AgreementTests.test_both_verifiers_agree_on_a_real_ledger_and_every_damaged_copy",
+            "test_hardening.CliRobustnessTests.test_verify_only_prints_what_verify_printed"
+          ]
+        },
+        {
+          "id": "I-5",
+          "invariant": "It runs only what was judged, and judging is not activation: the installable unit is a projection of a qualifying report made on this host, the runtime refuses files that differ from the unit's digests, and nothing here installs or enables a unit",
+          "absorbs": [
+            "owner 1",
+            "owner 7",
+            "INV-7"
+          ],
+          "enforced_in": "judge.conclusions and `unit --report` when installing; the runtime's digest gate at every start",
+          "checks": [
+            "DB-24"
+          ],
+          "tests": [
+            "test_qualify.RuntimeGateTests.test_changed_code_is_refused_everywhere",
+            "test_qualify.ProjectedUnitTests.test_a_report_that_does_not_qualify_is_refused",
+            "test_qualify.ActivationStaysSeparateTests.test_no_judge_or_qualification_code_installs_or_enables_anything"
+          ]
+        },
+        {
+          "id": "I-6",
+          "invariant": "Bounded: one budget for each whole cycle, every unit timing derived from it, and restart decided by the exit class",
+          "absorbs": [
+            "owner 6",
+            "INV-8",
+            "INV-9"
+          ],
+          "enforced_in": "the cycle's alarm (runtime.py); timings derived from cycle_budget_seconds (manifest.py, unitgen.py); RestartPreventExitStatus from NO_RESTART_EXIT_CODES",
+          "checks": [
+            "DB-14",
+            "DB-25"
+          ],
+          "tests": [
+            "test_budget.CycleDeadlineTests.test_catching_the_alarm_does_not_save_the_cycle",
+            "test_blind.NoRestartTests.test_fail_closed_exits_are_never_restarted"
+          ]
+        }
       ]
     },
     "evidence": {
