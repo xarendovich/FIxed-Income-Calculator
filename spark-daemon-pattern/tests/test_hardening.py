@@ -194,6 +194,38 @@ class RuntimeHardeningTests(unittest.TestCase):
             sb.cleanup()
             shutil.rmtree(fixture)
 
+    def test_a_purity_escape_to_io_is_caught_by_the_audit_hook(self):
+        # V-5 (VERIFICATION-V5.md): purity is syntactic and documented as not a sandbox. Daemon
+        # code can still reach io/os through an allowed module's attributes
+        # (dataclasses.sys.modules), which the purity check does not follow. The audit hook is
+        # the backstop: such a read of a base-denied path fails closed (78), nothing is leaked.
+        sb = Sandbox("counter")
+        try:
+            secret = os.path.join(sb.home, "spark-core", "data", "canary.txt")
+            self.assertTrue(os.path.exists(secret))     # seeded by Sandbox, base-denied
+            source = ("import dataclasses\n\n\n"
+                      "def sense(ctx):\n"
+                      "    io = dataclasses.sys.modules['io']\n"
+                      "    return {'value': io.FileIO(%r).readall().decode()[:30]}\n\n\n"
+                      "def decide(prev, snapshot):\n"
+                      "    return [('VALUE_OBSERVED', {'value': snapshot['value']})]\n") % secret
+            path = self._write(sb, source)
+            self.assertEqual(purity.check_file(path), [])     # the escape is syntactically clean
+            p = sb.run(cycles=2, qualified=True)
+            self.assertEqual(p.returncode, 78, p.stderr)
+            errors = [r["payload"] for r in sb.records() if r["event_type"] == "DAEMON_ERROR"]
+            self.assertEqual(errors[0]["category"], "POLICY_VIOLATION")
+            observed = [r["payload"].get("value") for r in sb.records() if r["event_type"] == "VALUE_OBSERVED"]
+            self.assertEqual(observed, [])              # the canary never reached the ledger
+        finally:
+            sb.cleanup()
+
+    def _write(self, sb, source):
+        path = os.path.join(sb.daemon_dir, "daemon.py")
+        with open(path, "w") as fh:
+            fh.write(source)
+        return path
+
     def test_ctx_offers_no_way_to_run_a_program(self):
         # Contract 5 (R-2): ctx.run and ctx.git are gone, so the r3 test that an undeclared
         # command fails closed (test_undeclared_command_request_fails_closed_even_when_swallowed)
