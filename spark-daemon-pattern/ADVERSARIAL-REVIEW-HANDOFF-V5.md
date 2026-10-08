@@ -139,3 +139,5 @@ emergency exists.
    in the pattern; the binding moves to the pilot, pinned to a pattern commit and contract digest;
    §3 is a holding copy until the pilot's copy exists. The ledger-reading semantics are now a tested
    tool (`tools/daemon-start.py`), not prose, so a host runbook cannot simplify them away.
+8. The kernel-facing edges (`KERNEL-REGISTER-CANDIDATE-KU-33.md` §2): every "not built" cell there is
+   a boundary with no owner yet; none should be built before KU-33 names one.

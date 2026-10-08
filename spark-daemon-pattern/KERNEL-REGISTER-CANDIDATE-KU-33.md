@@ -1,0 +1,53 @@
+# Candidate register row for the kernel update: KU-33 (PD-54), an owner for resident components
+
+- **Status:** CANDIDATE FOR THE KERNEL REVIEW. Drafted in the pattern repository for the owner to carry into `Kernel-Update` at Gate B. Nothing here is adopted; the register's rows keep `Owner decision: PENDING` until the owner records them.
+- **Written against:** `xarendovich/Kernel-Update` at `ddec911` (register KU-01..32; `spec/next/KERNEL_CONTRACT_DRAFT.md` §6 owner map; `VERIFICATION.md` gates A–E), and this pattern at contract 5.0.0 (`2d080b407b6c82b230563670746f4a615b2c96660ec68f4509574562c282001d`).
+- **Admission rule honoured:** the register says `ADD` "adds review/evidence work, not a kernel pillar, provider interface, or runtime mechanism". This row adds one informative owner-map line and one evidence pin. It adds no K2 requirement ID, no type, no interface, no daemon state to the kernel.
+
+## 1. The row, in the register's format
+
+| ID | Classification | Evidence or candidate problem | Recommended treatment / owner |
+|---|---|---|---|
+| KU-33 | ADD | KU-07 and KU-20 classify process incarnation, lifecycle states, exit tables and signal safe points as MOVE OUT to "adjacent owners' contracts", and the draft's informative owner map (§6) names "Observer / daemon / UI" only generically. No row names the adjacent owner, the owning document, or the boundary for resident components; the daemon pattern's own record expected a slot "by kernel v2" (its PD-31, PD-54). A move-out with no named destination is a gap, not a decision: the next reader cannot tell whether daemon lifecycle is unowned or owned elsewhere. | Add one row to the §6 owner map: **"Resident components (observe-only daemons)"**, an adjacent owner *below* the fixed kernel, owning document the daemon pattern contract (pin S10), lifecycle *resident, not invoked*; consumes nothing from the kernel at runtime and only `describe` at authoring time; supplies verified ledger facts (`status`, the copyable independent verifier) and qualification reports, both facts without authority. Exclusions: not a Tool capability; no authority, no Memory writes, no act or send (`act` and `named` stay reserved, KU-26/PD-60); no kernel completion gate; no second source of runtime authority. Add S10 (the pattern, commit and contract digest) and the pilot's pin to `EVIDENCE.md`. No K2 requirement, pillar, interface or runtime mechanism is added. **Owner:** the owner names the adjacent owner; today that is the pattern's maintainer, with the FirstBorn pilot as its first consumer. |
+
+`Owner decision: PENDING`.
+
+**Proposed §6 owner-map line** (replaces the generic "Observer / daemon / UI" entry's daemon half; the Observer and UI halves are unchanged):
+
+| Owner | Responsibility | Exclusion |
+|---|---|---|
+| Resident components (observe-only daemons) — daemon pattern contract, S10 | Their own manifest, confinement (kernel-enforced), ledger, blindness, qualification and lifecycle; resident, not invoked; evidence supplied as verified facts. | Not a Tool capability; no authority, no Memory write, no act or send; no kernel completion gate; no second source of runtime authority. The kernel takes no dependency on any daemon. |
+
+**Proposed evidence pin for `EVIDENCE.md`:**
+
+| ID | Source | What it supplies |
+|---|---|---|
+| S10 | `xarendovich/FIxed-Income-Calculator`, `spark-daemon-pattern/` at `6ab59a0`; contract 5.0.0 `2d080b40…` | The resident-component contract, its conformance battery, the independent verifier, the hardware gate (`HARDWARE-GATE-DGX.md`), and the pattern's own decisions deferred to the kernel (PD-54..62). SOURCE-INSPECTED by the owner; no runtime executed for the kernel review. |
+| S11 | FirstBorn pilot (vendored copy at 3.1.0) — *the owner supplies the commit* | The first consumer; the G-6 hardware run. REPORTED until the evidence bundle exists. |
+
+**Why this and not a kernel pillar.** KU-01 keeps six boundaries and "no new pillar". A daemon is not a seventh: it is a thing that lives *under* the kernel's floor, confined by the kernel of the operating system rather than by Spark's. The row places it there explicitly, which is what KU-07/KU-20 imply and never say.
+
+**Cross-references the row should carry.** KU-14/KECC ↔ the pattern's `contract/versions.json`, pin test and field-by-field migration messages (a support inventory for contracts 1.0.0 → 5.0.0, which PD-39 asked for). KU-28/V-12 ↔ the pattern's adjudication → cuts → verification → hardware-gate sequence. V-09's "DGX/ARM64 … NOT RUN" ↔ `HARDWARE-GATE-DGX.md`: one device visit can serve both, recorded separately.
+
+## 2. The owner's questions: how do the heads attach, and is it built?
+
+The kernel's six domains ("heads"): Orchestrator, Agent, Tool, Memory, Inference, State/Event. Below, for each: what attaches to the pattern today, which contract protects that edge, who can use it, and what is **not** built. The short answer is that the pattern's *internal* contracts are all built and tested; the *kernel-facing* edges are recorded as decisions and, with two exceptions, not built — which is the right order, since every one of them needs the owner named by KU-33 first.
+
+| Head | What attaches today | The contract that protects it | Built? |
+|---|---|---|---|
+| **Orchestrator** | Nothing. The kernel never starts, stops or schedules a daemon; the host's systemd does, from a unit that only a qualifying report can produce, and only a person installs or enables it (I-5, PD-50: no zero-touch activation). | The unit as a projection of the report; the runtime's digest gate at every start; the hardware gate. | **Built** for start. **Recorded, not built:** withdrawal and revocation (U-5: drain within a bound, a revoked digest refused), the activation register (PD-40). |
+| **Agent** | Nothing at runtime. In the other direction an agent may *author* a daemon: `describe → scaffold → envelope → precheck → validate → battery → stop` (DAEMON-CONTRACT §7). | The candidate envelope has no field for a result or an approval; producer kind is provenance only, never trust (`AUTHORITY`; PD-62). | **Built** (`spark-daemon-author`, DB-24, the authoring protocol). PD-62 as a *kernel* rule: recorded, pending. |
+| **Tool** | A daemon **is not a Tool** and uses none. It runs no program (R-2, contract 5); it is resident, not invoked (P4: the L0 verbs `invoke`/`quiesce` do not fit it). Its only sensing surface is `ctx`: `read_text`, `list_dir`, `stat`, `disk_usage`, `now_utc`, `unsettled`, published in the contract with signatures. | The contract's `ctx` section; purity; the audit hook; Landlock (execute granted nowhere). | `ctx` is **built**. A **tool-head taxonomy does not exist** in either repository: the kernel draft defines Tool only as "executable capability boundary, not permission granted by a generated request" (and KU-29 removes concrete type names from Core); the pattern recommended X1's L0 as the place such a taxonomy is defined, with this pattern as pilot 0 (PD-46/47) and the Step 13A tool pilots beside it. **Not built, and not this pattern's to build.** |
+| **Memory** | Never. A daemon cannot write Memory; `~/spark-core/data` is base-denied in every manifest and by Landlock. | The no-gaps rule (R-1), `PathPolicy`, the unit's `InaccessiblePaths`. | **Built** as a denial. Nothing to add; the kernel row should say "no Memory write" so it is a stated exclusion, not an accident of a path list. |
+| **Inference** | Nothing at runtime (I-1: observe only). The one future path is a model *reading* a digest. | The digest is rendered contained (`render.py`, DB-10: hostile text cannot escape its structure) and stamped with the ledger head. How it reaches a model is PD-61: a user or tool turn, delimited, staleness-checked, never a system prompt. | Containment **built**. PD-61 as a kernel rule: **recorded, not built**. Until it exists no model should read a digest as evidence. |
+| **State / Event** | The ledger. Readers attach through `status --json`, `status --verify-only`, the copyable `verifier/ledger_verify.py`, and `tools/daemon-start.py`; never by parsing the file themselves (N-19). | `spark-daemon-ledger/1` (append-only, hash-chained, canonical JCS, one writer); `spark-daemon-report/1`; `spark-daemon-status/1`; two independent verifiers (DB-22). The kernel draft's "ledger sequence is an ordering position, not a clock" is already the pattern's rule (`seq`, `timestamp_utc`, `boottime_ms` kept distinct). | **Built.** The kernel-side consumers are **not**: the activation register (PD-40), the off-host anchor (PD-58, residual risk 5), a shared exit taxonomy (PD-55; KU-20 says none in the kernel). |
+
+**Who can use these, today:**
+
+| Consumer | How | State |
+|---|---|---|
+| **FirstBorn** | A vendored copy under its own names, bound by the three-hash rename map (R-8b); 3.1.0 in use; migration to 5.0.0 listed in `REVIEW-PACKAGE-V5.md` §6. | **Built and in use** (the pilot). |
+| **Spark Core** | **No attachment exists, by design on both sides.** The pattern denies `~/spark-core/data`; the kernel's SP-10 forbids model sessions reading `~/spark-core`; the kernel "takes no dependency on an observer daemon". A Spark-side reader of daemon facts would attach through State/Event (above) once PD-40/PD-58 give it a place. | **Not built; not designed.** Needs KU-33 first. |
+| **An LLM operating in a Git repository** | As a **producer**: the authoring protocol, built. As a **reviewer**: the review packages, the evidence directories and the clean-checkout reruns, which is how r4.11 → 5.0.0 has been run. As a **reader of evidence**: PD-61, not built. As a **kernel-side consumer**: undefined until KU-33. | Producer and reviewer paths **built**; reader path **not**. |
+
+**Order of work the row implies.** Nothing in the right-hand "not built" column should be started before KU-33 names the owner, for the same reason the register gives for PD-54 gating the rest: an interface with no owner on either side drifts. After KU-33: PD-40 and PD-58 (State/Event, deployment facts), then PD-61/PD-62 (Inference/Agent, before any model reads a digest or writes a candidate), then the tool-head taxonomy in X1's L0 with this pattern as pilot 0 (PD-46/47), then PD-55/59/60 once their evidence exists. This is the order already recorded in `ADJUDICATION-PLUG-AND-PLAY.md` §8, with the heads named.
