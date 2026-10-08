@@ -187,6 +187,6 @@ Recommendation: APPROVE the boundary now; DEFER the slot's placement to kernel v
 
 Adopt r3 as the pattern's baseline, subject to the PDs above. The hardening closes every escape found in review, and the layered design is confirmed: Landlock contained the file-system effects of every escape it could see. Adopt the contract and envelope as the handoff to the future authoring subsystem, with PD-31's boundary recorded before that subsystem exists. The order of the next steps matters more than their size:
 
-1. **On the DGX Spark:** run `make test` and `make battery-examples` (aarch64, Landlock ABI 7 expected). Then install `meminfo-watch` as a real unit and confirm `DAEMON_START.landlock.status == "enforced"`. This is the first time anything runs under PID 1 (HF-07 and PD-30).
+1. **On the DGX Spark:** run `make test` and `make battery-examples` (aarch64, Landlock ABI 7 expected). Then install `meminfo-watch` as a real unit and confirm `DAEMON_START.landlock.status == "enforced"`. This is the first time anything runs as a service under a real host systemd, with systemd as PID 1 (HF-07 and PD-30). Procedure: `HARDWARE-GATE-DGX.md`.
 2. **Rule on PD-23 to PD-31** together with the pending PD-01 to PD-22, since several interact (PD-09 with PD-25, PD-11 with PD-27).
 3. **Only then** give the authoring subsystem its kernel-v2 slot. It inherits a published, versioned, test-pinned contract and an evidence path that it cannot shortcut.

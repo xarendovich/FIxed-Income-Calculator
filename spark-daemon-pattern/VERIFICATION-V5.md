@@ -2,7 +2,7 @@
 
 - **Continues:** the interim independent verification (`Spark_Daemon_v5_Independent_Verification_Interim.md`, 2026-10-07). That pass verified the archive against GitHub, the commit chain, the contract identity, the 261-test inventory, the facts-only report and focused static suites. It could not run the Landlock-dependent half, because its sandbox had no Landlock (ABI −38) and no `strace`. It listed the next work as items 1 to 6, answered below.
 - **Who:** Claude, at the owner's request, while the first reviewer was unavailable. **This pass is not independent:** Claude wrote the code under review. It is an adversarial self-review plus the dynamic reruns the first sandbox could not do. Its findings are reproduced, and its evidence is committed so the first reviewer can check it.
-- **Environment:** this container has Linux 6.18 x86_64, **Landlock ABI 7**, `strace`, `systemd-analyze`, and Python 3.10, 3.11.15, **3.12.3 (the DGX version)** and 3.13.12. It is not the DGX, and nothing here ran under systemd as PID 1.
+- **Environment:** this container has Linux 6.18 x86_64, **Landlock ABI 7**, `strace`, `systemd-analyze`, and Python 3.10, 3.11.15, **3.12.3 (the DGX version)** and 3.13.12. It is not the DGX, and nothing here ran as a service under a real host systemd (systemd as PID 1).
 - **Revision:** 2026-10-07.
 
 ## Result in one paragraph
@@ -66,7 +66,7 @@ No predicate appears in both columns, and none of the r4.11 gates is lost. Three
 | The fixes, Python 3.11.15 and 3.12.3 with `jsonschema` | **264 of 264, none skipped** (261 + the 3 new tests in `tests-verification.txt`); `fixed-selftests-*.txt` | the same three PASS on 3.12.3 (`fixed-battery-*.txt`); `make check-contract` up to date |
 | The fixes, from a clean checkout (3f67f51), Python 3.12.3, long workspace paths | **264 of 264, none skipped** (`clean-selftests-python3.12.txt`) | three batteries PASS (`clean-battery-*`); contract up to date; clone clean (`clean-summary.txt`) |
 
-The DGX run is still the one piece no container can stand in for: aarch64, its kernel's Landlock ABI, and systemd as PID 1 (G-6).
+The DGX run is still the one piece no container can stand in for: aarch64, its kernel's Landlock ABI, and the daemon running as a service under the real host systemd, with systemd as PID 1 (G-6; `HARDWARE-GATE-DGX.md`).
 
 ## For the owner
 

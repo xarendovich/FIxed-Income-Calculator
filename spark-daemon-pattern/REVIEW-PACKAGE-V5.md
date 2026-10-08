@@ -72,7 +72,7 @@ The owner's eighth invariant ("nothing relaxes …") is the preamble. `tests/tes
 
 ## 7. Open for the owner
 
-1. **The first DGX run (G-6).** Install `meminfo-watch` under systemd as PID 1 and confirm `DAEMON_START.landlock.status == "enforced"`. Recommended now, at the pilot's 3.1.0, as adjudicated.
+1. **The first DGX run (G-6).** Install the pilot daemon as a service under the real host `systemd` (systemd itself is PID 1; the daemon is not) and confirm `DAEMON_START.landlock.status == "enforced"`. Recommended now, at the pilot's 3.1.0, as adjudicated. Procedure, evidence bundle and acceptance: `HARDWARE-GATE-DGX.md`.
 2. **E-4:** what a path refused by more than one layer should be. Today it is a policy violation, exit 78.
 3. **R-8:** whether the pilot counts as the second real consumer that would justify neutral names and packaging.
 4. **Kernels without Landlock.** Since contract 5 the harness refuses to start there, so the run checks fail where they used to pass under test mode. CI and every developer kernel need Landlock (ABI 1 or later).

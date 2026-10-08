@@ -25,7 +25,7 @@
 | Profiles | PRECHECK ⊂ VALIDATE ⊂ BATTERY | **ADOPT** | PRECHECK is the static checks (DB-01, DB-02, DB-24, DB-25); VALIDATE adds the short confined run and the ledger check (DB-03, DB-04); BATTERY is every check. Three immutable ID sets over one registry. The swapped command names print a migration notice for one release |
 | E-8 | Six invariants | **ADOPT** | As proposed in r4.11 §5 |
 | E-9 | `verify` into `status --verify-only`; authoring commands out of the runtime CLI | **ADOPT after a caller audit** | Known callers of `verify`: this repository's README and tests, and the pilot's README |
-| Pilot | Skip 3.1.0 → 4.0.0; move straight to v5 | **ADOPT, with one addition** | **Do not wait for v5 for the first DGX run.** The pilot's installer already qualifies and installs pressure-watch at 3.1.0 on every `fb update`. Its first run under systemd as PID 1 answers G-6, which no contract version changes |
+| Pilot | Skip 3.1.0 → 4.0.0; move straight to v5 | **ADOPT, with one addition** | **Do not wait for v5 for the first DGX run.** The pilot's installer already qualifies and installs pressure-watch at 3.1.0 on every `fb update`. Its first run as a service under the real host systemd (systemd as PID 1) answers G-6, which no contract version changes |
 
 **Result:**
 - **Removed:** seams 1, 2, 5 and 8.

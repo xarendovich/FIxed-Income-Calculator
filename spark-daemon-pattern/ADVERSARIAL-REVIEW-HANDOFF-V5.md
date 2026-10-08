@@ -26,7 +26,8 @@ It needs a Linux kernel with **Landlock** (ABI ≥ 1). Contract 5 refuses to sta
 without it, so on a kernel that lacks it (a stock container, ABI −38) the dynamic half fails
 closed with exit 78 and cannot be exercised — the first reviewer hit exactly this. `jsonschema`
 is an optional test dependency; four schema-agreement tests skip without it. The DGX (aarch64,
-systemd PID 1) is the one environment no container substitutes for.
+the daemon as a service under the real host systemd) is the one environment no container
+substitutes for: `HARDWARE-GATE-DGX.md`.
 
 ## 2. The trust boundaries, as an attacker sees them
 
@@ -97,7 +98,7 @@ Everything here is reproducible; scripts live in `evidence/v5/verification/`.
 4. **`ctx` data bounds (B).** `read_text`'s decode, `list_dir`'s ordering past the cap (HF-33's
    neighbourhood), `stat` on exotic inodes, a watched file that grows during the read.
 5. **The systemd unit as generated (A).** `systemd-analyze` scores it SAFE offline, but no unit
-   has run under PID 1. On the DGX, confirm `DAEMON_START.landlock.status == "enforced"`, the
+   has yet been started by a real host systemd. On the DGX, confirm `DAEMON_START.landlock.status == "enforced"`, the
    seccomp filter permits the Landlock syscalls (DB-15), and a forbidden write/connect is
    actually blocked by the running unit, not only in the battery's stand-in.
 6. **Canonical/JCS equivalence (C).** `canonical_bytes` is claimed byte-identical to RFC 8785
@@ -132,5 +133,5 @@ emergency exists.
 3. Residual 6 / V-1: bind a skeleton tree digest as a fourth expected digest.
 4. V-2 (sign reports?) and V-3 (`unit --report --check FILE`?): keep, defer or drop.
 5. E-4: the outcome when more than one layer refuses a path (today: exit 78).
-6. The DGX run (G-6): the full suite, the three batteries, and the first start under systemd on
-   aarch64 with that kernel's Landlock ABI.
+6. The DGX run (G-6): the full suite, the three batteries, and the first start as a service under
+   the real host systemd on aarch64 with that kernel's Landlock ABI (`HARDWARE-GATE-DGX.md`).
