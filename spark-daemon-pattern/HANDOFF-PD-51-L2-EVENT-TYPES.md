@@ -38,6 +38,8 @@ The kernel's heads are consumers. A head attaches to a daemon by subscribing to 
 - **Where C lives:** X1's L0, with this pattern as pilot 0 (PD-46/47), not in the pattern. The lifecycle events are the first entry, and they already have two independent consumers.
 - **B alone** adds a schema per daemon without decoupling, which is the drift the owner ruled against (N-23).
 
+**D's cost, stated so it is never mistaken for L2.** A consumer that pins `(manifest_sha256, daemon_code_sha256, event_type)` is bound to *one implementation*: when that daemon is re-qualified for any reason, every consumer must be re-pointed. That is the price of zero mechanism, and it is acceptable exactly until two implementations of one observation exist (the trigger above). Adoption of D is the owner's decision at the close of this review, not a step taken before it (`ADJUDICATION-ALIGNMENT-REVIEW.md`, item 6).
+
 **The even simpler thing found by looking back:** option D is not a workaround; it is what the qualification design already produces. Every report and `DAEMON_START` carries the digests. Nobody had said out loud that a consumer may cite them as a contract.
 
 ## 5. The Advise class and *where* the model sits (the owner's open sentence)
