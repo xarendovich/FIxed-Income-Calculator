@@ -1,7 +1,7 @@
 # Roadmap: what remains, and the kernel v2 track
 
 - **As of:** 2026-10-08, contract 5.0.0 at `6aa8671` (HF-43/44 fixed, verification pass done).
-- **What this can and cannot say.** This repository holds the daemon pattern. It does not hold the Spark kernel. The kernel v2 material visible here is: the owner's statement that the daemon subsystem "doesn't have a spot in the roadmap but will have one by kernel v.2" (PD-31), the Kernel v0.2 Stage A review (cross-checked in r3.1), and the decisions this pattern recorded for kernel v2 (PD-54 to PD-62). I have **not** seen a kernel v2 roadmap or schedule, so the "on track" judgement below is about what the pattern must deliver to kernel v2, not about kernel v2's own timeline. If the kernel repository exists, it can be attached to this session and the second half filled in from source.
+- **Sources.** This repository (the pattern) and, since 2026-10-08, the kernel repository `xarendovich/Kernel-Update` at `ddec911` (2026-10-06, "Merge pull request #2"), read in full: its README, the 2026-10-04 review register (KU-01..31, V-01..12, gates A to E), the 2026-10-06 owner direction (KU-32), `spec/next/`, and `spec/historical/`. §3 and §4 are written from that source. Under the kernel's SP-10 rule no model session reads `~/spark-core`; nothing here does.
 
 ## 1. Where the pattern stands
 
@@ -37,30 +37,40 @@
 - **`daemon_class: act`, `network.mode: named`**: reserved through kernel v2 (PD-60); each needs its own adjudication against its recorded preconditions.
 - **A command-backed extension** (the Repository Observer's need, PD-72): not in the generic core; commands would run outside the confined process.
 
-## 3. The kernel v2 track, as recorded here
+## 3. The kernel track, from the kernel repository
 
-The pattern's job for kernel v2 was to fix the interface the authoring subsystem will plug into, before that subsystem exists, so that it inherits "a published, versioned, test-pinned contract and an evidence path that it cannot shortcut" (DAEMON-CONTRACT §11). **That part is delivered**, at 5.0.0, with less surface than when it was promised (eleven seams to six boundaries).
+**What the kernel repository is.** Not kernel v2 shipped: a *smallest-stable-foundation boundary pass* over the `v0.2.1-review` text, status **PROPOSED FOR REVIEW**, "no Class C adoption, runtime implementation, activation, or release freeze". Its own words: kernel work is "adjacent to the capability roadmap, not another numbered step", and the release identity is deliberately unnamed ("use 'next kernel review draft' until the owner selects the release identity", KU-30). So "kernel v2" has no date in that repository either; it has gates.
 
-What kernel v2 itself still has to decide is unchanged since r3.4, and every item is still **PENDING** with the owner. The order recorded then still holds:
+**Where it stands, by its gates** (`review/2026-10-04/VERIFICATION.md` §3; `review/2026-10-06/OWNER-DIRECTION.md`):
 
-| Order | Decision | What it settles | Blocks |
-| --- | --- | --- | --- |
-| 1 | **PD-54** a roadmap slot and an owner for resident components | the daemon subsystem gets a WBS number: an observe-only plane below the fixed kernel; skeleton in the fixed tier, manifests and `daemon.py` pluggable | everything below |
-| 2 | **PD-57** one unit generator for every resident component | which generator (this pattern's `unitgen.py` or WBS 4.0's) owns units; the other becomes its conformance reference | installing anything beyond the pilot |
-| 2 | **PD-58** the off-host anchor | one place, one writer, one schedule for every ledger's chain head | residual 5 here; the Observer's equivalent limit |
-| 3 | **PD-56** how the Observer and daemons share one durable writer | vendored pinned copy now; kernel-owned library decided at v2 | PD-34 |
-| 4 | **PD-61** how untrusted evidence (a digest) reaches a model | one kernel rule: user/tool turn, delimited, staleness-checked, never a system prompt | any model reading a digest |
-| 4 | **PD-62** producer identity never raises trust | a model-written candidate faces the same suite and the same Class C activation | any model writing a candidate; the authoring slot (PD-31) |
-| 5 | **PD-55** a shared exit-reason taxonomy | needs the Observer plus one installed daemon as evidence | — |
-| 5 | **PD-59** stay with the Python standard library | revisit trigger: a second kernel interface needing `ctypes` | — |
-| 5 | **PD-60** whether any resident component may act or send | keep `act` and `named` reserved through v2 | — |
+| Gate | What it is | State at `ddec911` |
+| --- | --- | --- |
+| A — review preparation | inspect source and history, classify, publish the bounded kernel/KECC drafts and the review plan | **Done** (2026-10-04): register KU-01..31, drafts in `spec/next/` |
+| B — reviewer and owner disposition | reviewers use the fixed candidate; the owner records keep/modify/add/move-out/remove/defer | **Directed, unsigned** (2026-10-06): "go with the recommendations"; D2 adopted, D1 as an owner-profile first, KU-01..31 accepted as classified, KU-32 added and done. Every row still reads `Owner decision: PENDING` until the owner records the disposition itself |
+| C — complete contract build | reconcile the full S4 baseline, apply only accepted deltas, select the release identity | **Open; blocked on the owner's own capture**: the real runtime SHA, the Step 8.5 freeze record and the full S4 baseline inventory (K-3) |
+| D — implementation only where needed | amend types, adapters or tests in the owning repository where an accepted requirement actually changes them | Not started |
+| E — qualification and release | isolated regression/replay/provider tests; device-only tests on the device; owner sign-off, exact release identity | Not started. "DGX/ARM64/native ordering, resource and stop-signal qualification: **NOT RUN**" |
 
-Already on kernel v2's list from earlier rounds: PD-39 (KECC change classes and a support horizon per published contract), PD-40 (the activation register), PD-41 (reserved human-correction event names), PD-46/47 (L0 in X1 with this pattern as pilot 0), PD-50 (no zero-touch activation for resident components).
+**What it says about daemons.** The direction of the whole register is *shrink and move out*. Three rows touch this pattern directly:
+
+- **KU-07 (MOVE OUT):** process exit, slot states, incarnation, binding ids, `admit()`, L0/L2 and channel grants leave the kernel text for the transport/policy/host/X1 profiles.
+- **KU-20 (MOVE OUT):** lifecycle states, sticky failures, root policy, signal safe points and the local exit table "remain Observer WBS 3.1A and adjacent owners' contracts. No shared daemon exit code table" in the kernel.
+- **KU-21 (REMOVE):** the proposed criterion that WBS 3.1A is done once an export is *named* is deleted; a live export is required.
+
+And the historical line it inherits: "the kernel MUST NOT take a dependency on … an observer daemon"; "the observer daemon may finish WBS 3.1a against the constraints"; importing the observer daemon as a kernel module is a non-goal.
+
+**The material finding for this pattern.** The register contains **no row** that creates the slot this pattern was told to expect: no "daemon authoring" slot (PD-31), no WBS number or owner for resident components (PD-54), and no mention of the pattern, `spark-daemon`, PD-54..62, or a hardware gate. The kernel is not absorbing daemon concerns; it is pushing them to "adjacent owners". That is **compatible** with PD-54's own proposal ("an observe-only plane *below* the fixed kernel; the skeleton in the fixed tier; manifests and `daemon.py` pluggable") and with KU-20's "adjacent owners' contracts" — but compatibility is not a decision. Nobody has yet been named as that adjacent owner, and PD-54..62 appear in this repository only.
+
+**What that means for the recorded order.** PD-54 (an owner and a slot) still gates the rest, and it now has a concrete home: it should be raised as a row in the kernel register (an **ADD**, in the register's vocabulary, naming the resident-component plane as an adjacent owner below the kernel), or else recorded as *out of the kernel's scope by design* with this pattern's own contract as the owning document. Either is a decision the owner records at Gate B; neither is implied by the current register.
+
+Two of the kernel's own needs line up with work already done here, and should be cross-referenced when PD-54 is raised: **KU-14/KECC** (support inventory and a shrinking-horizon rule) is what `contract/versions.json`, the pin test and the migration messages already do for daemon contracts 1.0.0 → 5.0.0 (PD-39 asked for exactly this); **KU-28/V-12** (explicit review → disposition → consolidation → implementation → deployment gates, with code identity and tested environment recorded) is the shape of this pattern's adjudication → cuts → verification → hardware gate.
 
 ## 4. On track?
 
-**For what the pattern owes kernel v2: yes, and early.** The boundary, the contract and the evidence path exist, are frozen-candidate, reviewed, and simpler than promised. Nothing kernel v2 needs from this side is missing; the open items here (freeze, 5.0.1 wording, V-1, the DGX gate) are hardening of a delivered thing, not prerequisites for v2 planning.
+**For what the pattern owes the kernel line: yes, and ahead of it.** The pattern's deliverable was a published, test-pinned contract and an evidence path a producer cannot shortcut, with the authoring boundary fixed in advance. That is delivered at 5.0.0. The kernel repository, read in full, asks for nothing from this side that is missing, and its direction (move daemon lifecycle out to adjacent owners) is the direction this pattern already took.
 
-**For kernel v2's own decisions: not started**, by the evidence here. PD-54 to PD-62 are all PENDING, and PD-54 (an owner and a slot) gates the rest. The practical sequence is unchanged: close the DGX gate so the kernel decisions rest on a real deployment fact (PD-57 and PD-58 are "deployment facts before any daemon is installed"), then rule PD-54, then the rest in the recorded order.
+**For the kernel line itself: Gate A done, Gate B directed but unsigned, Gate C blocked on the owner's own capture, D and E not started.** There is no schedule in the kernel repository to be on or off track against; there are gates, and the next two are the owner's.
 
-**What would change this assessment:** seeing the kernel v2 roadmap itself. If it exists in another repository, attach it and this section gets filled in from source rather than from what the pattern recorded about it.
+**The one thing that is not on track, because it is on nobody's list:** the slot. PD-31 said the daemon subsystem "will have a spot by kernel v2". The kernel register does not give it one, and by its own design would not. **Recommendation:** raise PD-54 as a register row at Gate B (an ADD naming the adjacent owner), or record the alternative explicitly. Until then the pattern is a well-reviewed thing with no named place in the kernel's map.
+
+**The DGX visit serves both lines.** The kernel's Gate E device qualification ("DGX/ARM64/native ordering, resource and stop-signal") and this pattern's hardware gate are both NOT RUN and both need the same machine. They are different tests and must be recorded separately, but one visit can be planned to do both.

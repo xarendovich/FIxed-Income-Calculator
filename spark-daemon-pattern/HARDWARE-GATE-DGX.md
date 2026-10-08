@@ -19,6 +19,22 @@
 
 **One addition for the v5 run (§5).** Contract 5's report binds the host it was made on *and* the home of whoever ran the battery (HF-41). So the v5 battery must be run **on the DGX itself, as the service's user** (the one whose `~` the manifest means), never under `sudo` from an operator's account and never on another machine: `unit --report` refuses a report from another host, and a report made as root would name `/root`.
 
+## 0b. Where the click-path lives: adjudication of the two reviews (2026-10-08)
+
+Two reviewers answered the §0 question ("owner's call whether §3 moves to the pilot's repository"). They agree, and so do I: **the standard stays here; the FirstBorn binding moves to the pilot; §3 stays until the pilot's copy exists.**
+
+| Point | Verdict | Note |
+| --- | --- | --- |
+| Split by who owns the fact (LS-1: each fact once) | **ACCEPT** | §§1, 4, 5, 6, 7 are the standard and do not move. §3 is a visit procedure; its FirstBorn facts (`fb unlock`, `/srv/firstborn/…`, user `fb`, the unit name) belong to the pilot's schedule, not the freeze candidate's |
+| "The code is unlinked, the document is not" | **ACCEPT** | My §0 note was true of tests and false of prose. Reviewers will read a FirstBorn map in the pattern as normative; R-8's point is exactly that one project's names do not live in the core |
+| Phase 1 today: do not delete §3; mark it a holding copy | **ACCEPT, done** | The notice is at the top of §3. A move that is not committed in the pilot repo is a deletion, and this is the only reviewed procedure |
+| Phase 2: pilot owns the click-path, pinned to a pattern commit and contract digest; then §3 here becomes the slot table | **ACCEPT** | §3a below is that slot table, written now so Phase 2 is a deletion, not a rewrite. The pilot's runbook must record `pattern_sha` and `contract_sha256`; if either moves it is stale by construction, which is how v5 already binds a report |
+| Lock the ledger-reading semantics in the pattern as a tool, not prose | **ACCEPT, done** | `tools/daemon-start.py`: standard library, imports nothing from the pattern, torn tail reported and never parsed, a bad line is exit 2 and never a traceback (HF-43), no schema-string check so it reads a renamed vendored ledger too. Tested in `tests/test_tools.py`. §3.7 now calls it; the inline snippet is gone |
+| "`cat`/`cp` violate the locking invariants" (reviewer 1) | **CORRECT THE CLAIM** | They do not. The single-instance lock is a separate `flock` file, and read-only verification is a tested guarantee (DB-16: bytes and mtime unchanged). The reason to use the tool is parse semantics, not locks: a torn tail, and a line that must not crash the reader |
+| A `verify-bundle` checker in the pattern (reviewer 1) | **DEFER, right direction** | §4's bundle and §5's acceptance as an executable check is the natural next step after the first bundle exists; not a prerequisite for the DGX visit |
+| `make dgx-runbook` concatenating the frozen gate and the pilot annex (reviewer 1) | **ACCEPT for the pilot repo, with one constraint** | Belongs there, not here. It must pin by commit SHA and must not put the word "spark" into any FirstBorn path or filename (the owner's standing rule); the output name is the pilot's |
+| Do not copy §3 into both repos; do not build a click-path from `unit --plan` before this visit (reviewer 2) | **ACCEPT** | N-23 again, and not a prerequisite |
+
 ## 1. What the run must prove
 
 The guarantees already proven in tests must survive the real deployment boundary:
@@ -47,7 +63,24 @@ A battery PASS stays qualification evidence only; it grants no activation author
 
 This gate is deliberately not replaced by emulation or by the x86_64 evidence in `evidence/`.
 
+## 3a. The host interface: what a runbook must bind
+
+The pattern's requirements of any host runbook. The pilot's runbook (§3, until it moves) is one binding of these slots; the next consumer writes its own.
+
+| Slot | Requirement | FirstBorn's binding (3.1.0 visit) |
+| --- | --- | --- |
+| `pattern_sha` | the pattern commit the runbook was written against | recorded in the pilot's runbook |
+| `contract_sha256` | the contract digest this visit qualifies against; a 3.1.0 run cannot be cited for 5.0.0 | 3.1.0's; 5.0.0 is `2d080b40…` |
+| service user | the user whose `~` the manifest means; **never root**, never `sudo` from an operator account (HF-41) | `fb` |
+| unit name | what the real service manager instantiated (§3.5, §3.6) | `firstborn-pressure-watch.service` |
+| manifest path | the manifest the battery and the runtime bind | `/srv/firstborn/repo/host/daemons/pressure-watch/manifest.json` |
+| ledger path | read only with `tools/daemon-start.py` (§3.7) and the host's own verifier (§3.8) | `/srv/firstborn/logs/daemons/pressure-watch/ledger.jsonl` |
+| tools on the host | `strace`, `systemd-analyze` (§2) | the operator confirms in §3.1 |
+| visit | G-6 at 3.1.0, or the later 5.0.0 qualification (§5) | G-6 at 3.1.0 |
+
 ## 3. Operator procedure (the pilot's runbook, G-6 at 3.1.0)
+
+> **HOLDING COPY.** This section is one host's binding of §3a (FirstBorn, 3.1.0). It is kept in the pattern only until the pilot repository carries it, pinned to this commit and to the contract digest (§0b, Phase 2). Then it is deleted here and §3a remains. Any other consumer writes its own §3 against §3a; nothing in the pattern's code or tests depends on this text.
 
 Record exact values at every step; never substitute expected ones.
 
@@ -99,24 +132,12 @@ cat "/proc/$PID/cgroup"
 
 **3.7 The actual `DAEMON_START`** (the ledger is authoritative, not the journal)
 ```
-sudo -u fb python3 - <<'PY'
-import json
-from pathlib import Path
-p = Path("/srv/firstborn/logs/daemons/pressure-watch/ledger.jsonl")
-starts = []
-with p.open("rb") as f:
-    for line in f:
-        if not line.endswith(b"\n"):      # a torn tail: never committed, quarantined at next start
-            break
-        obj = json.loads(line)
-        if obj.get("event_type") == "DAEMON_START":
-            starts.append(obj)
-if not starts:
-    raise SystemExit("STOP: no DAEMON_START record found")
-print(json.dumps(starts[-1], indent=2, sort_keys=True))
-PY
+sudo -u fb python3 -I -B /path/to/pattern/tools/daemon-start.py \
+  /srv/firstborn/logs/daemons/pressure-watch/ledger.jsonl
 ```
-Keep the complete record. Acceptance needs `landlock.status == "enforced"` and no unexplained entry in `landlock.gaps`; also record `landlock.abi`, the manifest and code digests, the contract/skeleton identity, the clock fields, and (for v5) `harness` is `null`.
+`daemon-start.py` is one standard-library file (copy it to the host; it imports nothing). It reads the ledger the way the ledger is designed to be read: a torn tail (an uncommitted partial last line after a crash, which the next start quarantines) is reported on stderr and never parsed; a committed line that does not parse is exit 2 with its position, never a traceback. It checks no schema string, so it also reads the 3.1.0 pilot's renamed ledger. It verifies nothing; §3.8 does.
+
+Keep the complete record. Acceptance needs `landlock.status == "enforced"` and no unexplained entry in `landlock.gaps`; also record `landlock.abi`, the manifest and code digests, the contract/skeleton identity, the clock fields, and (for v5) that `harness` is `null`.
 
 **3.8 Verify the ledger independently** (must not change bytes or mtime)
 ```

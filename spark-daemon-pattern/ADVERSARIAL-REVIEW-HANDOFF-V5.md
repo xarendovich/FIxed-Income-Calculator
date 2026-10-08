@@ -135,3 +135,7 @@ emergency exists.
 5. E-4: the outcome when more than one layer refuses a path (today: exit 78).
 6. The DGX run (G-6): the full suite, the three batteries, and the first start as a service under
    the real host systemd on aarch64 with that kernel's Landlock ABI (`HARDWARE-GATE-DGX.md`).
+7. Where the FirstBorn click-path lives: decided (`HARDWARE-GATE-DGX.md` §0b). The standard stays
+   in the pattern; the binding moves to the pilot, pinned to a pattern commit and contract digest;
+   §3 is a holding copy until the pilot's copy exists. The ledger-reading semantics are now a tested
+   tool (`tools/daemon-start.py`), not prose, so a host runbook cannot simplify them away.
