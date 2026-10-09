@@ -71,7 +71,7 @@ One MAJOR, one DGX re-qualification, deletions first so that the bundle V-1 hash
 
 10. **P2-F3 (pass 2):** delete the constant `qualified: true` from `DAEMON_START`; the three digests in the same payload are the facts.
 11. **P2-F2 (pass 2):** `status` reports `lock: held | free | absent` from the run lock the runtime already holds; `observing` requires `held` when the lock is present; `free` reports `not_watching` with its reason. One field, no new state.
-12. **P2-F1 (pass 2):** `DAEMON_START` records the resolved policy (home, reads, output directory, denied paths). The deletion that would make the path fact single-owned, **U-9** (absolute paths only; `~`, `SPARK_DAEMON_HOME` and `status --output-dir` deleted), waits on pass 3's census of which battery checks need the throwaway home (`UDC-REVIEW-PASS-2.md`).
+12. **P2-F1 (pass 2):** `DAEMON_START` records the resolved policy (home, reads, output directory, denied paths). The deletion that would have made the path fact single-owned, **U-9** (absolute paths only), is **closed by census** (`UDC-REVIEW-PASS-2.md` §6): the battery's confinement proofs need a home they own (fixture trees, the DB-03 snapshot, the DB-13/DB-17 canary). The lock is created `0644` so `status` can read it as any user who can read the output directory; `unreadable` is the truthful fallback.
 
 **The residual-5 receipt, restated so the cut cannot grow a write for it:** the consumer writes the receipt, outside the daemon's writable domain; the daemon grows no write to place it; it detects rollback after that point; it is not a grant, not a checkpoint file beside the ledger, not an authority subsystem, and it cannot prove the pre-attachment prefix.
 

@@ -80,8 +80,48 @@ Appended to the list in `UDC-PASS-1-ADJUDICATION.md` §4 as items 10–12; the o
 
 Residual risks 8 and 9 in `HARDENING.md` record P2-F2 and P2-F1 against 5.0.1, so a DGX PASS at 5.0.1 is read with them, as residual 7 is.
 
-## 6. For pass 3
+## 6. The three pass-3 questions, with the census done and the options laid out
 
-- **The census for U-9:** which battery checks need the throwaway home. If none, `~` is deleted and three readers of one fact become one.
-- **The reads a qualification actually exercises.** With `~`, the DGX battery exercises workspace copies, not the real directories; whether that is the right meaning of "battery on the DGX as the service user" is a question for the hardware-gate text, not for this pass.
-- **The lock as a status witness on the DGX:** confirm `LOCK_SH | LOCK_NB` from the operator's user against a root-owned, mode 0600 lock file; if it cannot be opened, `lock: absent` is wrong and the field needs a fourth value, `unreadable`. That is a host fact to measure, not to design around in advance.
+The owner asked for options, an analogy and a recommendation for each. The census that question 1 needed was run first (2026-10-09); its result changes the recommendation.
+
+### Q1. Delete `~` (U-9), or keep it and record the resolved policy?
+
+**Census result.** The battery's throwaway home is load-bearing for four things: the `fixture_home` tree two of the three examples ship (`dir-watch`, `disk-watch`), which is what their reads resolve into; DB-03's before/after snapshot of the whole home, which is how "writes nowhere but `output_dir`" is proved; the canary planted at `~/spark-core/data/canary.txt`, which DB-13 (audit hook) and DB-17 (Landlock) must prove the daemon cannot read; and the output-directory redirect. With absolute paths none of these has a place to live: a canary cannot be planted in the owner's real `~/spark-core/data`, and a snapshot of a real home is neither bounded nor stable.
+
+| Option | What it is | Cost | Analogy |
+| --- | --- | --- | --- |
+| A. Delete `~` (U-9) | Manifests carry absolute paths; `SPARK_DAEMON_HOME`, `paths.expand`, the report's home input and `status --output-dir` go | Four battery mechanisms lose their ground; the confinement proofs would need a second kind of home anyway | Banning the shorthand "my house" from every form, then discovering the fire drill needs a house nobody lives in |
+| B. Keep `~`, record the resolved policy in `DAEMON_START` | The ledger states the home it expanded with and the reads, output directory and denials it was granted | One payload addition per start; no new flag, no new owner | Keep the shorthand, but the receipt prints the full address that was used |
+| C. Keep `~`, pin the home with `--expect-home` | The runtime refuses when its environment's home differs from the judged one | Enforces consistency only inside the unit file, which is the unpinned object M-3 already left to G-6; buys less than it costs | A lock on a door whose frame is not fastened to the wall |
+
+**Recommendation: B.** The deletion fails the census; the pin guards the wrong object; the record makes the fact visible to every reader, which is what L2 asks. U-9 is closed, not deferred. One bound: the installed unit's `Environment=` line is read as part of the G-6 inspection, since it is the only owner of the meaning until the record exists.
+
+### Q2. Does a DGX battery run under `~` exercise the real directories, and should it?
+
+It does not. Under `~` the battery exercises `fixture_home` copies and the canary, in a home it owns. That is by construction, and the census above says it must stay so.
+
+| Option | What it is | Cost | Analogy |
+| --- | --- | --- | --- |
+| A. Accept it, and say so | The battery proves the *mechanism* (confinement, ledger, blindness, bounds) on the DGX's kernel and Python; the real paths are host facts, checked at install (`require_paths` → `ConditionPathExists=`) and at every start by Landlock | None; one sentence in the hardware-gate text | A crash test uses a dummy, not the passenger; it still has to be done in the real car |
+| B. A second dynamic pass against the real directories | Run the battery with the service user's real home so reads are live | A test that reads production data, a second home for the canary that cannot exist, and a new campaign | Crash-testing with the family in the seats |
+| C. The first real start is the evidence | With B from Q1, the first `DAEMON_START` under the installed unit records the real resolved policy; the G-6 bundle captures it | None beyond Q1's record | The first drive on the road, logged |
+
+**Recommendation: A and C together.** The battery proves the car; the first start proves the road; nothing new is built. The hardware-gate text should state the division in one sentence so a PASS is never read as "the real directories were exercised by the battery".
+
+### Q3. Can the operator read a root-owned lock, so the status fact has the right values?
+
+The runtime creates the lock with mode `0600`, owned by the service user. An operator who is not that user gets `EACCES` on open, which is not the same as "no lock file" and must not be reported as `absent`. The same operator can already read the ledger only if the output directory permits it, so directory access is a precondition `status` already has; only the lock's own mode is in question.
+
+| Option | What it is | Cost | Analogy |
+| --- | --- | --- | --- |
+| A. Create the lock `0644` | Any user who can read the output directory can open it read-only and test `LOCK_SH \| LOCK_NB`; the lock carries no data | One constant; a world-readable empty file | A "busy" sign on the door you can read without the key |
+| B. A fourth status value, `unreadable` | `status` reports that it could not look, rather than guessing | Honest, but moves the problem to every reader | The sign is behind frosted glass; you are told you cannot read it |
+| C. Run `status` as the service user | `sudo -u <user> status …` | A procedure, not a design; the DGX runbook would carry it forever | Borrowing the key every time |
+
+**Recommendation: A, with B as the truthful fallback.** `0644` makes the common case readable; `unreadable` stays as the report for a misconfigured install, because a reader must never be told `absent` when the truth is "forbidden". Pass 3 measures it on the DGX: open the lock from the operator's user and confirm `held` for a running unit, `free` after a stop, and `unreadable` only if the mode was changed by hand.
+
+### What this leaves for pass 3
+
+- Confirm the lock readings on the real host (Q3), and that a stopped unit's lock reads `free`, not `absent`.
+- The hardware-gate sentence for Q2.
+- The 6.0.0 cut is otherwise complete: twelve items, with U-9 closed by census rather than deferred.
