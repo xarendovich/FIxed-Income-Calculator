@@ -36,6 +36,7 @@ spark-daemon-pattern/
   ADVERSARIAL-REVIEW-HANDOFF-V5.md  a reviewer's attack map for 5.0.0: trust boundaries, what was probed, open holes, ranked targets
   HARDWARE-GATE-DGX.md      the open DGX Spark / real-host-systemd gate: what it proves, operator runbook, evidence bundle, acceptance
   ROADMAP.md                what remains for the pattern, and the kernel track read from the kernel repository at ddec911
+  CONSOLIDATION-5.0.1.md    current scope cleanup: precise chain claim, closed/deferred noncritical items, hardware order
   KERNEL-REGISTER-CANDIDATE-KU-33.md  the PD-54 row drafted for the kernel register (an ADD: an owner-map line and an evidence pin), with the per-head attachment review
   HANDOFF-PD-51-L2-EVENT-TYPES.md  review handoff: event_types as the L2 attachment unit; options D/A/B/C; where an Advise-class model sits
   DAEMON-TAXONOMY-RECONCILIATION.md  the owner's daemon taxonomy checked line by line: built, recorded, or ruled out by contract 5
