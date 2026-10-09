@@ -1,11 +1,11 @@
-"""Spark daemon pattern, v0.3 (r3) draft for review and adjudication.
+"""Spark daemon pattern: the observe-only resident-daemon skeleton behind contract 5.x.
 
-A daemon built from this pattern is declared by a manifest (manifest.py), runs inside a
-fixed skeleton (runtime.py and the modules it uses), and must pass the conformance
-battery (battery.py) before anyone activates it. Whoever writes a daemon builds against the
-published contract (contract.py) and hands back a candidate envelope (handoff.py), which
-carries no authority. Nothing in this package installs, enables or starts a service; the
-unit generator only prints text for a human to review.
+A daemon is declared by a manifest (manifest.py), runs inside a fixed skeleton (runtime.py
+and the modules it uses), and must pass the conformance battery (battery.py) before it can
+produce qualification evidence. Whoever writes a daemon builds against the published
+contract (contract.py) and hands back a candidate envelope (handoff.py), which carries no
+authority. Installation or activation remains a separate owner decision. Nothing in this
+package installs, enables or starts a service.
 """
 
 # The skeleton (this implementation), not the contract: 0.3.0 from r3 to r4.11, 0.5.0 with contract 5.

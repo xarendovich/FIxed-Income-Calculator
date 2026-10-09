@@ -8,8 +8,8 @@ contract it targeted. The shape mirrors the Step 9 HandoffEnvelope: exact identi
 (contract_version plus a deterministic contract_sha256) and a required contract, and the
 same rule - observation is not activation: nothing a candidate says about itself is
 evidence. Only precheck, validate and the battery produce evidence (one report shape,
-spark-daemon-report/1), and only a qualifying battery report plus a human Class C ruling
-activates anything.
+spark-daemon-report/1), and activation remains a separate owner activation decision;
+nothing in this package installs or enables a unit.
 
 contract_version follows semantic versioning for daemon authors: MAJOR when a daemon that
 satisfied the old contract can fail the new one (a new purity rule, a narrower bound), MINOR
@@ -29,7 +29,7 @@ from . import purity, render, unitgen
 from .canonical import MAX_SAFE_INT, canonical_bytes, sha256_hex
 
 CONTRACT_SCHEMA = "spark-daemon-contract/1"
-CONTRACT_VERSION = "5.0.0"
+CONTRACT_VERSION = "5.0.1"
 CANDIDATE_SCHEMA = "spark-daemon-candidate/1"
 MANIFEST_SCHEMA_ID = "urn:spark:schema:spark-daemon-manifest:4"
 
@@ -37,7 +37,7 @@ AUTHORITY = (
     "A candidate carries no authority. Whoever or whatever produced it - a person, a script "
     "or a model - it cannot certify itself: precheck and validate are fast feedback, the "
     "conformance battery's PASS is the only admissible evidence, and activation remains a "
-    "human Class C decision. A producer is never granted authority that no one adjudicated."
+    "separate owner activation decision. A producer is never granted authority that no one adjudicated."
 )
 
 # Rules manifest.py enforces that JSON Schema cannot express. Listed so an offline checker
@@ -141,8 +141,8 @@ def manifest_json_schema() -> dict:
             },
             "cycle_budget_seconds": int_range(mf.CYCLE_BUDGET_MIN, mf.CYCLE_BUDGET_MAX,
                                               "The longest one whole cycle (sense, decide, digest) may take. "
-                                              "Every ctx call gets what is left of it; at the budget the cycle "
-                                              "fails. WatchdogSec = 2 x budget + "
+                                              "One runtime alarm enforces the whole-cycle deadline; at the budget "
+                                              "the cycle fails. WatchdogSec = 2 x budget + "
                                               f"{mf.WATCHDOG_MARGIN_SECONDS}, TimeoutStopSec = WatchdogSec + 10, "
                                               "TimeoutStartSec = max(60, WatchdogSec); at most half of "
                                               "blind_limit_seconds."),
@@ -244,8 +244,8 @@ def _evidence() -> dict:
                             "binds every input of the unit generator. Installing checks that the report "
                             "qualifies and was made on this host; the runtime checks at every start that "
                             "the manifest, daemon.py and contract are those the unit names",
-        "admissible_for_activation": "a qualifying battery PASS is evidence; activation remains a human "
-                                     "Class C decision",
+        "admissible_for_activation": "a qualifying battery PASS is evidence; activation remains a separate "
+                                     "owner activation decision",
     }
 
 
@@ -280,9 +280,10 @@ INVARIANTS = (
      "tests": ["test_blind.BlindPeriodTests.test_always_unsettled_stops_at_the_limit",
                "test_blind.BlindPeriodTests.test_blindness_survives_a_restart_loop",
                "test_blind.BlindPeriodTests.test_a_backward_clock_step_does_not_hide_blindness"]},
-    {"id": "I-4", "invariant": "The ledger is the one source of truth: append-only and hash-chained, verified two "
-                               "independent ways, interpreted once; integrity uncertainty and every gap are "
-                               "visible, never rendered healthy",
+    {"id": "I-4", "invariant": "The ledger is the canonical local record: append-only and hash-chained, verified two "
+                               "independent ways relative to the observed head, interpreted once; integrity "
+                               "uncertainty and every gap are visible, never rendered healthy; completeness "
+                               "across observations requires a head anchor outside the daemon output directory",
      "absorbs": ["owner 4", "owner 5", "INV-5", "INV-6"],
      "enforced_in": "ledger.py writes; ledger.py and verifier/ledger_verify.py verify; semantics.interpret interprets",
      "checks": ["DB-04", "DB-06", "DB-07", "DB-16", "DB-22"],
@@ -359,9 +360,9 @@ def contract_body() -> dict:
             "unsettled": "sense() returned ctx.unsettled(reason): the cycle is abandoned before decide(), "
                          "with no event, no DAEMON_ERROR and no new digest",
             "failed": "sense() or decide() raised, or returned invalid data: DAEMON_ERROR (repeats collapsed)",
-            "budget": "one monotonic deadline per cycle, cycle_budget_seconds from its start: every ctx call "
-                      "gets the time left, and an alarm interrupts sense() and decide() at the deadline, "
-                      "including pure-Python loops; the cycle then fails with DAEMON_ERROR category "
+            "budget": "one monotonic deadline per cycle, cycle_budget_seconds from its start: one runtime alarm "
+                      "interrupts sense() and decide() at the deadline, including pure-Python loops; the cycle "
+                      "then fails with DAEMON_ERROR category "
                       "CYCLE_BUDGET_EXCEEDED. The ledger write is never interrupted. The digest gets what is "
                       "left; past it the previous digest stays",
             "blind_limit": "no accepted cycle for blind_limit_seconds (monotonic clock), whether from "
@@ -389,6 +390,14 @@ def contract_body() -> dict:
                                   "requires an Act-family class, the supervisor/worker split (PD-72) and "
                                   "pre-authorized survival actions",
             },
+        },
+        "notifications": {
+            "transport": "systemd sd_notify lifecycle/status only",
+            "messages": ["READY=1", "STATUS=...", "WATCHDOG=1", "STOPPING=1"],
+            "semantics": "host lifecycle and operator status only; carries no observation payload, grant, "
+                         "decision or outcome",
+            "status_sequence": "STATUS may display the current ledger sequence for operator context; ledger "
+                               "sequence is an ordering position, never a clock or authority input",
         },
         "digest": {
             "label_pattern": render.LABEL_RE.pattern,

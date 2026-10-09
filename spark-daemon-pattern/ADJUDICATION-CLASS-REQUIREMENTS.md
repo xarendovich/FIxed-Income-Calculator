@@ -56,3 +56,12 @@ No code changed. Contract unchanged (5.0.0). The reviewer's requirement IDs (ADM
 1. Supply the source of the ordered wording cut (the `utc/` `c026165b` note, M-04) so the Class C split can be done as written rather than guessed.
 2. Confirm the 5.0.1 wording bundle as one digest bump: I-4 "relative to the head", the Class C split, the notify invariant.
 3. Confirm ADM-9 = V-1 as the 6.0.0 code cut that follows the wording.
+
+## 7. 2026-10-09 consolidation disposition
+
+The owner authorized the consolidation pass after this review. The requirement sets remain **review matrices**, not a second normative hierarchy beside I-1..I-6.
+
+- **5.0.1 wording bundle:** implemented. I-4 now states verification relative to the observed head; current normative “Class C” wording is replaced by **owner activation decision**; the sd_notify boundary is documented; stale per-call cycle-timeout wording is corrected.
+- **ADM-9 = V-1:** remains the one substantive admission gap and is planned for contract 6.0.0 as `runtime_bundle_sha256`, strengthening I-5 rather than creating I-7.
+- **STB/LAT rows:** continue as review evidence mappings only. DB-19 remains reserved for the direct cgroup/resource measurement work; real-host-systemd qualification is G-6 / `HARDWARE-GATE-DGX.md`, not a repurposed DB-19.
+- **Noncritical mechanisms:** signed reports, unit-file check convenience, a hand-written JSON parser, checkpoint acceleration, Advise-class runtime work and an event registry remain deferred to their explicit triggers in `ROADMAP.md`.

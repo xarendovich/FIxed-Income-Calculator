@@ -30,3 +30,14 @@ No code changed. Contract unchanged (5.0.0).
 1. Item 3: confirm V-1 as the 6.0.0 change and its place after the freeze.
 2. Item 4: confirm "the first attachment is the anchor" as PD-58's path, so Spark Core's attach and the anchor are one piece of work.
 3. Item 2: confirm that owner-ruling records stay in the package as records; nothing in them is normative in 5.0.0.
+
+## 2026-10-09 consolidation disposition
+
+The owner authorized the consolidation pass after this review. The current disposition is:
+
+- **V-1:** confirmed as the next major admission change, contract 6.0.0. The bound object is now called `runtime_bundle_sha256` and covers the exact trusted runtime bundle rather than an arbitrary repository tree. It strengthens I-5 and creates no new invariant.
+- **PD-58:** confirmed as a consumer-side attachment property. The first externally stored verified-head receipt establishes the first checkpoint; it cannot prove pre-attachment completeness and does not justify an anchor daemon/service/protocol.
+- **Current class scope:** historical Blind Forester / Advise records stay as records. Contract 5.x and the planned 6.0 admission change remain observe-only.
+- **KU-33:** narrowed to an informative owner-map boundary only. CLI commands, per-head attachment details and integration sequencing do not belong in the kernel row.
+- **PD-51 / option D:** retained only as an implementation citation, not an L2 contract. A shared event registry stays deferred until two independently qualified implementations intentionally claim the same semantic observation and a consumer needs to switch between them.
+- **5.0.1 wording:** implemented in the consolidation branch: I-4 is relative to the observed head, current normative authority wording says “owner activation decision”, and sd_notify is explicitly lifecycle/operator status only.

@@ -1,8 +1,10 @@
-# Daemon contract and candidate handoff — draft for adjudication (r3)
+# Daemon contract and candidate handoff — current contract with historical design record
 
-- **Status:** DRAFT FOR ADJUDICATION, a companion to `README.md` in the way `ADJUDICATION-AP.md` is. Implemented and tested (see `tests/test_handoff.py`). Every PD below is PENDING until the human records a ruling.
-- **Revision:** r3, 2026-09-27, by Claude.
-- **Roadmap position:** groundwork. The subsystem that will *produce* daemons has no slot in the roadmap yet; it gets one by kernel v2 (PD-31). This document fixes the interface that subsystem will plug into, so that when it arrives nothing about the pattern has to change and nothing about its authority is left implicit.
+- **Current status:** contract 5.0.1 / r4.12 software baseline candidate. The normative author interface is `spark-daemon describe` plus `contract/*.json`; DGX Spark / real-host-systemd qualification remains open.
+- **Current authority rule:** candidates and reports carry no authority. A qualifying battery PASS is evidence; installation/activation remains a separate owner activation decision.
+- **Scope:** `daemon_class: observe` only. No network, no program execution, no Memory write, no model in the resident daemon.
+- **History:** this document began as the r3 design handoff. Sections that describe r2/r3 counts, Git-era capabilities, and PD-23..PD-31 are retained as historical design provenance. They are not a second source of current contract truth. Where historical prose conflicts with the published contract, the published contract wins.
+- **Current chain claim:** the ledger is the canonical local record and is independently verified **relative to the observed head**. Completeness across observations requires a head anchor outside the daemon output directory; an initial external receipt establishes the first checkpoint but cannot prove pre-attachment completeness.
 
 ## 1. The problem
 
@@ -75,7 +77,7 @@ A candidate is a folder: `manifest.json`, `daemon.py` and, from a script or a mo
 
 Stated once, and embedded verbatim in the contract (`authority`); every report carries its own authority note:
 
-> A candidate carries no authority. Whoever or whatever produced it - a person, a script or a model - it cannot certify itself: validate and precheck are fast feedback, the conformance battery's PASS is the only admissible evidence, and activation remains a human Class C decision. A producer is never granted authority that no one adjudicated.
+> A candidate carries no authority. Whoever or whatever produced it - a person, a script or a model - it cannot certify itself: validate and precheck are fast feedback, the conformance battery's PASS is the only admissible evidence, and activation remains a separate owner activation decision. A producer is never granted authority that no one adjudicated.
 
 This is the discipline the project already applies to daemon *content*, applied identically to whatever *produces* daemon content. The same scope-control rule holds as in Step 9: the pattern exposes what a producer needs in order to be checked, and never gives a producer a way to reach activation, the decision log, the contract itself, or the battery's verdict.
 
@@ -88,7 +90,7 @@ No change may relax any of these. Each is enforced in one place; the checks and 
 | I-1 | Observe only, and the kernel enforces it: no network, no program, writes only in output_dir, reads only the declared paths, under one path policy for every layer | Landlock and the systemd unit, both projected from pathpolicy.PathPolicy; purity and the audit hook are diagnostics and a tripwire | DB-15, DB-17, DB-18 | owner 2, owner 3, INV-1, INV-2 |
 | I-2 | Never record a guess: only an accepted cycle produces events; an unsettled, truncated or failed read abandons the cycle | the runtime's cycle (runtime.py), with ctx raising on truncation | DB-04 | INV-3 |
 | I-3 | Blindness surfaces within blind_limit_seconds, across restarts and clock steps, and is never restarted away | semantics.blindness, the one function the runtime and status use | DB-20 | INV-4 |
-| I-4 | The ledger is the one source of truth: append-only and hash-chained, verified two independent ways, interpreted once; integrity uncertainty and every gap are visible, never rendered healthy | ledger.py writes; ledger.py and verifier/ledger_verify.py verify; semantics.interpret interprets | DB-04, DB-06, DB-07, DB-16, DB-22 | owner 4, owner 5, INV-5, INV-6 |
+| I-4 | The ledger is the canonical local record: append-only and hash-chained, verified two independent ways **relative to the observed head**, interpreted once; integrity uncertainty and every gap are visible, never rendered healthy; completeness across observations requires a head anchor outside the daemon output directory | ledger.py writes; ledger.py and verifier/ledger_verify.py verify; semantics.interpret interprets | DB-04, DB-06, DB-07, DB-16, DB-22 | owner 4, owner 5, INV-5, INV-6 |
 | I-5 | It runs only what was judged, and judging is not activation: the installable unit is a projection of a qualifying report made on this host, the runtime refuses files that differ from the unit's digests, and nothing here installs or enables a unit | judge.conclusions and `unit --report` when installing; the runtime's digest gate at every start | DB-24 | owner 1, owner 7, INV-7 |
 | I-6 | Bounded: one budget for each whole cycle, every unit timing derived from it, and restart decided by the exit class | the cycle's alarm (runtime.py); timings derived from cycle_budget_seconds (manifest.py, unitgen.py); RestartPreventExitStatus from NO_RESTART_EXIT_CODES | DB-14, DB-25 | owner 6, INV-8, INV-9 |
 
@@ -98,7 +100,7 @@ No change may relax any of these. Each is enforced in one place; the checks and 
 | --- | --- | --- | --- | --- |
 | `precheck [--json] [--envelope]` | milliseconds, no process started | DB-01, DB-02, DB-24, DB-25: manifest schema and cross-field rules, purity, envelope, unit lint and derived timings | PASS / FAIL | No |
 | `validate [--json] [--envelope]` | about 1 s | precheck, plus DB-03 (a 2-cycle run under Landlock with the audit hook recording; no file outside the output dir changed) and DB-04 (ledger provenance with zero `DAEMON_ERROR`) | PASS / FAIL | No |
-| `battery [--envelope]` | about 15 s | every registered check (DB-01 to DB-25; DB-19, 21, 23 reserved) | PASS / FAIL / INCOMPLETE | **Only a qualifying report** (full battery, PASS), then a human Class C ruling |
+| `battery [--envelope]` | about 15 s | every registered check (DB-01 to DB-25; DB-19, 21, 23 reserved) | PASS / FAIL / INCOMPLETE | **Only a qualifying report** (full battery, PASS), then a separate owner activation decision |
 
 Contract 5 swapped the first two names so the profiles nest in the order they run (precheck ⊂ validate ⊂ battery); the CLI says so on stderr for one release. All three write one report shape, `spark-daemon-report/1`, which holds facts only; the verdict and "qualifies" are derived on read. The installable unit is a projection of a qualifying battery report: `unit --report R` refuses unless the report qualifies and was made on this host, and the runtime refuses to start the unit if the manifest, `daemon.py` or contract differ from those it names.
 
@@ -114,7 +116,7 @@ Nothing here builds that subsystem. This is the protocol it would follow, so its
 4. `precheck --json --envelope` until `RESULT: PASS`. Diagnostics carry `layer`, `where` (manifest field or `daemon.py`) and `line`.
 5. `validate --envelope` until `RESULT: PASS`.
 6. `battery --envelope` once. The report goes to a human, with the envelope, the diff against the closest reference daemon, and the install plan (`unit --plan`).
-7. Stop. Activation is Class C.
+7. Stop. Activation remains a separate owner decision.
 
 **It must never:** edit anything under `spark_daemon/`, `contract/` or `tests/`; widen a manifest (`reads`, `resources`) just to make a check pass without saying so in `intent`; retry the battery with a different seed to fish for a PASS (the seed is recorded); or present a precheck OK as a pass.
 
@@ -147,12 +149,12 @@ The goal was to borrow shapes that many people already know, not to invent vocab
 
 - **`spark-new daemon` with authority.** `scaffold` is a better blank page, not a generator, and it grants nothing.
 - **A model inside this package.** The pattern stays standard-library-only and deterministic. A model-based producer is an external client of the contract with `producer.kind: "model"`.
-- **Auto-activation on battery PASS.** Unchanged: Class C.
+- **Auto-activation on battery PASS.** Unchanged: a qualifying report is evidence, not activation authority.
 - **Signing envelopes.** An envelope identifies, it does not authenticate. If a producer later runs on another host, add signing with the SCITT/Sigstore work (PD-19), not before.
 - **A contract diff tool** (what changed between 1.0.0 and 1.1.0 for authors). Cheap to add once there is a second version. Not needed yet.
-- **DB-19, a run under real systemd** (`systemd-run --wait` with the generated unit's properties). This is the most valuable next battery check. It needs a host where PID 1 is systemd, which the build workspace is not. Recommended as the first addition after the DGX smoke test (HARDENING.md, residual risk 3).
+- **Real-systemd qualification is not DB-19.** DB-19 remains reserved for the direct cgroup/resource measurement work (PD-76). The real-host service proof is **G-6 / `HARDWARE-GATE-DGX.md`**. If a real-systemd run later becomes a battery check, assign a new DB ID rather than repurposing DB-19.
 
-## 10. Decisions for adjudication
+## 10. Historical r3 decisions for adjudication
 
 Continuing the README numbering (PD-01 to PD-22). Each has a recommendation and a decision line.
 
@@ -183,10 +185,13 @@ Recommendation: APPROVE. Confirm on the DGX under real systemd. Decision: PENDIN
 **PD-31. Roadmap: a "daemon authoring" slot at kernel v2, with its boundary fixed now.** It consumes `describe`; it produces candidate folders; it may loop on validate and precheck and invoke the battery; its outputs are evidence, never rulings; it never activates, never edits the contract or the skeleton, and never widens a manifest without saying so in `intent`.
 Recommendation: APPROVE the boundary now; DEFER the slot's placement to kernel v2 planning. Decision: PENDING
 
-## 11. Final recommendation
+## 11. Current recommendation
 
-Adopt r3 as the pattern's baseline, subject to the PDs above. The hardening closes every escape found in review, and the layered design is confirmed: Landlock contained the file-system effects of every escape it could see. Adopt the contract and envelope as the handoff to the future authoring subsystem, with PD-31's boundary recorded before that subsystem exists. The order of the next steps matters more than their size:
+Hold contract 5.0.1 as the software-baseline candidate for DGX qualification. Do not expand the active daemon class, add an event registry, add signing, or add checkpoint acceleration on this line. The next major admission change is V-1 in contract 6.0.0: bind the trusted runtime bundle so the enforcing code itself is part of what was judged.
 
-1. **On the DGX Spark:** run `make test` and `make battery-examples` (aarch64, Landlock ABI 7 expected). Then install `meminfo-watch` as a real unit and confirm `DAEMON_START.landlock.status == "enforced"`. This is the first time anything runs as a service under a real host systemd, with systemd as PID 1 (HF-07 and PD-30). Procedure: `HARDWARE-GATE-DGX.md`.
-2. **Rule on PD-23 to PD-31** together with the pending PD-01 to PD-22, since several interact (PD-09 with PD-25, PD-11 with PD-27).
-3. **Only then** give the authoring subsystem its kernel-v2 slot. It inherits a published, versioned, test-pinned contract and an evidence path that it cannot shortcut.
+For the current line:
+
+1. Run the full current suite and the three reference-daemon batteries on the DGX, then exercise the exact 5.0.1 unit under the real host systemd as specified by `HARDWARE-GATE-DGX.md`.
+2. Treat PD-58 as a consumer-side attachment property: the first external receipt establishes the first anchored checkpoint; it does not retroactively prove the ledger was complete before attachment.
+3. Keep future Advise/Act classes, L2 event registries, signed reports, and command-backed extensions deferred until their recorded triggers fire.
+4. Preserve the r3 material above as history; do not use its old counts, Git surfaces, or pending-decision labels as current contract state.

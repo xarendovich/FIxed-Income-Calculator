@@ -1,43 +1,76 @@
-# Roadmap: what remains, and the kernel v2 track
+# Roadmap: what remains, and the kernel track
 
-> **Closed to growth, 2026-10-09.** The architecture is complete at 5.0.0. `CLOSEOUT-V5.md` holds the review of Kernel-Update PR 2, the closing rule (four kinds of change only), the live/record/candidate index and the owner's exit list. This roadmap stays as the ordered list of what remains; nothing is added to it.
-
-- **As of:** 2026-10-08, contract 5.0.0 at `6aa8671` (HF-43/44 fixed, verification pass done).
-- **Sources.** This repository (the pattern) and, since 2026-10-08, the kernel repository `xarendovich/Kernel-Update` at `ddec911` (2026-10-06, "Merge pull request #2"), read in full: its README, the 2026-10-04 review register (KU-01..31, V-01..12, gates A to E), the 2026-10-06 owner direction (KU-32), `spec/next/`, and `spec/historical/`. §3 and §4 are written from that source. Under the kernel's SP-10 rule no model session reads `~/spark-core`; nothing here does.
+- **As of:** 2026-10-09, contract 5.0.1 candidate, digest `26e543fd8b36dd1d945be953c12d705c306adaa7cddf1cc2d24b893eff09dd16`.
+- **Scope:** the active pattern is a small deterministic resident observer below the Spark kernel. It is host-managed, observe-only, runs no program, uses no network, and produces verified local facts without authority.
+- **Kernel source:** `xarendovich/Kernel-Update` at `ddec911` remains the comparison point for §3 and §4. Its direction is to move daemon/process lifecycle concerns out to adjacent owners, not into the Spark kernel.
 
 ## 1. Where the pattern stands
 
 | Deliverable | State |
 | --- | --- |
-| A published, versioned, test-pinned contract | **Done.** 5.0.0, `2d080b40…`, recorded in `contract/versions.json`; `make check-contract` fails if the published files drift from the enforced rules |
-| An evidence path a producer cannot shortcut | **Done.** One facts-only report; verdict and qualification derived on read; the unit is a projection of a qualifying report; the runtime refuses anything else |
-| The authoring boundary fixed before the authoring subsystem exists | **Done.** DAEMON-CONTRACT §7: `describe → scaffold → envelope → precheck → validate → battery → stop`; the envelope carries no authority; producer kind is provenance only (PD-62) |
-| Six invariants, each enforced in one place with its checks and tests named | **Done** (E-8); `test_invariants.py` holds them |
-| Independent verification | **Partly done.** The first reviewer verified source, chain, contract, inventory and the static suites; the Landlock-dependent half was reproduced here (not independently) on Python 3.12.3/3.13 and from a clean checkout |
+| Published, versioned, test-pinned contract | **5.0.1 candidate.** Wording-only consolidation of 5.0.0; no enforcement rule changes |
+| Evidence path a producer cannot shortcut | **Done.** One facts-only report; verdict/qualification derived on read; unit is a projection; activation stays separate |
+| Observe-only runtime boundary | **Done.** No child programs, no network, one `PathPolicy`, Landlock + systemd enforcement |
+| Ledger verification | **Done relative to the observed head.** Two independent verifiers, one interpreter; completeness across observations requires an external head receipt |
+| Independent software verification | **Partly done.** Static/structural work was independently checked; Landlock-dependent reruns were reproduced by the code author and remain subject to the DGX pass |
 | Hardware qualification | **OPEN.** `HARDWARE-GATE-DGX.md` |
+| Higher daemon classes / event registry / model-in-daemon | **Not built and not on the current line.** Contract 5.x remains `daemon_class: observe` |
+
+Exact self-test and battery counts live in immutable evidence records. General architecture documents do not duplicate mutable totals.
 
 ## 2. What remains, in order
 
-### Now: the software freeze decision (owner)
-1. **Freeze 5.0.0 with HF-43/HF-44.** The fixes change no contract rule; the identity is unchanged. (`REVIEW-PACKAGE-V5.md`, `VERIFICATION-V5.md`.)
-2. **Residual 5 / PD-58: elevated (2026-10-08).** No consumer may treat an intact chain as a *complete* one until its head is anchored outside the output directory. Reword I-4 as "verified two ways *relative to the head*" in **5.0.1** (a text change, so a new contract digest). **The 5.0.1 wording bundle** (one digest change, no rule change) also carries: (a) disambiguating the pattern's "Class C" (a person's decision to install a unit) from the transport-contract class a reviewer reports under the same letters — the reviewer's cited source (`utc/`, `c026165b`, M-04, PD-82) is in neither repository this session can read, so the owner supplies it before the words are split; (b) writing the notify invariant down: `READY`, `STATUS`, `WATCHDOG`, `STOPPING` are host lifecycle only and carry no observation, grant or outcome; the start-up `STATUS=` line copies the ledger seq and must never be read as a clock (`ADJUDICATION-CLASS-REQUIREMENTS.md`). The anchor itself: **the first consumer attachment is the anchor** — a consumer that records the head it observed, off the output directory, is PD-58's "one place, one writer, one schedule". So Spark Core's attach and PD-58 are one piece of work, not a dependency chain (`ADJUDICATION-ALIGNMENT-REVIEW.md`, item 4).
-3. **Residual 6 / V-1: next contract change after the freeze (2026-10-08).** Bind a skeleton tree digest (`spark_daemon/`, `verifier/`) as a fourth expected digest, so a post-qualification edit to the skeleton is refused at start. It is **6.0.0**: `EXPECT_KEYS`, every unit's `ExecStart`, the runtime gate and `unit --report` change, and every qualified unit must be re-qualified, which is MAJOR by the contract's own rule. The reason is not that Landlock relies on the tripwires (PD-101: it does not); it is that the skeleton also holds the ledger writer, the blindness interpreter and the digest gate itself, so an edited skeleton could lie in the ledger (`ADJUDICATION-ALIGNMENT-REVIEW.md`, item 3).
-4. **E-4**, **V-2** (signed reports), **V-3** (`unit --report --check FILE`), **R-8** (neutral names/packaging, which needs the owner's ruling on whether the pilot is the second consumer).
+### A. Consolidate and software-freeze 5.0.1
 
-### Next: the hardware gate (operator, with the DGX)
-5. **G-6 at 3.1.0** with the FirstBorn `pressure-watch` pilot — recommended now, nothing waits for v5. Closes the basic "does this work under the real kernel and host systemd" question.
-6. **FirstBorn migrates directly to contract 5** (`REVIEW-PACKAGE-V5.md` §6 is the migration list; the pilot skips 4.0.0 as adjudicated).
-7. **Contract 5.0.0 qualified on the DGX**: battery run on the DGX as the service's user, unit from `unit --report`, evidence bundle per `HARDWARE-GATE-DGX.md` §4. **R-5c measurement** collected in the same visit.
+1. **Finish the 5.0.1 wording-only consolidation.** The patch:
+   - changes I-4 from an absolute source-of-truth claim to a chain verified **relative to the observed head**;
+   - states that completeness across observations needs an anchor outside the daemon output directory;
+   - replaces the ambiguous current-use `human Class C` label with **owner activation decision** while preserving historical records;
+   - records the `sd_notify` boundary: READY/STATUS/WATCHDOG/STOPPING are host lifecycle/operator status only, not observation, grant, outcome, authority or clock;
+   - corrects stale cycle-budget text left from the removed per-call timeout design.
+   This is a PATCH release because no daemon that satisfied 5.0.0 fails 5.0.1.
 
-### Then: the second independent pass (reviewer)
-8. The ranked targets in `ADVERSARIAL-REVIEW-HANDOFF-V5.md` §4, led by the JSON parser as a common-mode fault behind both verifiers (HF-43 showed one; the hand-parse option is open), post-qualification skeleton tampering (V-1), and an audit-hook escape that the kernel must still contain.
-9. Rerun the 265-test suite and the three batteries on the DGX environment — the one run no container can stand in for.
+2. **Close E-4 as intentional layered asymmetry.** One canonical `PathPolicy` owns policy. If Python proves a resolved path is explicitly forbidden, exit 78 is a policy violation. A generic `EACCES` is not automatically reclassified because the runtime may not know whether Landlock, Unix permissions, a mount or another host condition caused it. Do not add a mechanism just to force identical error labels from different enforcement layers.
 
-### Deferred, with recorded triggers
-- **R-5c** (checkpointed start-up verification): only if the DGX projection exceeds half the start timeout.
-- **R-8** (rename the core): only with a second real consumer.
-- **`daemon_class: act`, `network.mode: named`**: reserved through kernel v2 (PD-60); each needs its own adjudication against its recorded preconditions.
-- **A command-backed extension** (the Repository Observer's need, PD-72): not in the generic core; commands would run outside the confined process.
+3. **Keep reviewer requirement sets non-normative.** ADM/STB/LAT are useful review matrices, not a second contract hierarchy. Map findings back to I-1..I-6, hardware evidence, or deferred work. In particular ADM-9 is V-1 and strengthens I-5; it does not become I-7.
+
+4. **Defer convenience/security machinery without a present trust boundary.**
+   - **V-2 signed reports:** trigger only when a qualifying report crosses a trust boundary or becomes input to automated activation.
+   - **V-3 `unit --report --check FILE`:** no critical-path work; deterministic regeneration plus digest/diff already proves the fact.
+   - **Independent hand-written JSON parser:** do not build one merely for diversity. Keep bounded records, normalized parser failures, independent canonical re-encoding and differential fuzzing; reopen only if another concrete common-mode parser fault cannot be contained this way.
+   - **R-5c checkpoint acceleration:** measurement only; reopen only if DGX projection exceeds half the start timeout.
+
+5. **R-8 neutral packaging: trigger met, implementation later.** FirstBorn is a real second project consumer. Keep vendoring through the hardware gate, then define neutral/configurable package, CLI, environment and unit names before finalizing the contract-6 runtime bundle layout. Do not mix packaging changes into 5.0.1 qualification.
+
+### B. Qualify the current target on the DGX
+
+6. **Do not create a separate 3.1.0 campaign.** If the existing FirstBorn 3.1.0 `pressure-watch` pilot naturally comes up during `fb update`, preserve its G-6 evidence as a useful preliminary host/systemd proof. If it is not already present, do not spend a separate qualification cycle installing an old contract merely to remove it again.
+
+7. **Migrate FirstBorn directly to 5.0.1.** Skip 4.0.0 and 5.0.0 as deployment targets; the 5.0.1 change is wording-only relative to 5.0.0.
+
+8. **DGX-qualify the exact 5.0.1 baseline.** On the DGX, as the service user:
+   - run the full current self-test suite and all three reference batteries;
+   - create the installable unit from a qualifying report;
+   - run it under the real host systemd, with systemd as PID 1;
+   - capture the evidence bundle in `HARDWARE-GATE-DGX.md`;
+   - collect the R-5c verification-cost measurement without changing the architecture.
+
+Use two status concepts, not one overloaded word:
+- **SOFTWARE BASELINE FROZEN** = exact contract/code bytes fixed for qualification.
+- **DGX QUALIFIED** = that exact baseline passed the hardware gate.
+
+### C. Next major admission change after hardware qualification
+
+9. **V-1 becomes contract 6.0.0 and strengthens I-5.** Bind a `runtime_bundle_sha256`, not an arbitrary repository tree. The bundle covers the exact trusted code that can affect admission, confinement setup, ledger writing, interpretation and verification — including the runtime entrypoint, `spark_daemon/`, and the independent verifier. Tests, evidence, README/PDFs, vendoring and authoring tools are outside the trusted runtime bundle unless the 6.0.0 design proves otherwise. Reuse the existing deterministic tree-hash mechanics; do not invent a second hashing framework.
+
+10. **PD-58 is a consumer-side attachment property, not a new daemon service.** A consumer that records a verified head in a storage/authority domain the daemon cannot modify establishes the first externally held checkpoint. That receipt can detect rollback/truncation **after** the checkpoint; it cannot retroactively prove pre-attachment completeness. Do not build an anchor daemon, anchor protocol or new daemon invariant.
+
+### D. Deferred with explicit triggers
+
+- **Event-type/L2 registry:** no registry now. Current consumers may cite one implementation by `(manifest digest, daemon-code digest, event type)`; after 6.0.0 include the runtime-bundle digest. Build a shared event contract only when two independently qualified implementations intentionally emit the same semantic observation and a consumer needs to switch between them.
+- **Advise/Act classes:** taxonomy only. Contract 5.x/6.0 remains observe-only. If a model is involved, it is an external agent consuming verified facts, not code inside the resident daemon.
+- **Command-backed extension:** outside the generic core; only when a concrete consumer such as the Repository Observer requires it, under its own boundary.
+- **R-5c:** as above, only after the measured trigger.
 
 ## 3. The kernel track, from the kernel repository
 
@@ -65,11 +98,11 @@ And the historical line it inherits: "the kernel MUST NOT take a dependency on �
 
 **What that means for the recorded order.** PD-54 (an owner and a slot) still gates the rest, and it now has a concrete home: it should be raised as a row in the kernel register (an **ADD**, in the register's vocabulary, naming the resident-component plane as an adjacent owner below the kernel), or else recorded as *out of the kernel's scope by design* with this pattern's own contract as the owning document. Either is a decision the owner records at Gate B; neither is implied by the current register.
 
-Two of the kernel's own needs line up with work already done here, and should be cross-referenced when PD-54 is raised: **KU-14/KECC** (support inventory and a shrinking-horizon rule) is what `contract/versions.json`, the pin test and the migration messages already do for daemon contracts 1.0.0 → 5.0.0 (PD-39 asked for exactly this); **KU-28/V-12** (explicit review → disposition → consolidation → implementation → deployment gates, with code identity and tested environment recorded) is the shape of this pattern's adjudication → cuts → verification → hardware gate.
+Two of the kernel's own needs line up with work already done here, and should be cross-referenced when PD-54 is raised: **KU-14/KECC** (support inventory and a shrinking-horizon rule) is what `contract/versions.json`, the pin test and the migration messages already do for daemon contracts 1.0.0 → 5.0.1 (PD-39 asked for exactly this); **KU-28/V-12** (explicit review → disposition → consolidation → implementation → deployment gates, with code identity and tested environment recorded) is the shape of this pattern's adjudication → cuts → verification → hardware gate.
 
 ## 4. On track?
 
-**For what the pattern owes the kernel line: yes, and ahead of it.** The pattern's deliverable was a published, test-pinned contract and an evidence path a producer cannot shortcut, with the authoring boundary fixed in advance. That is delivered at 5.0.0. The kernel repository, read in full, asks for nothing from this side that is missing, and its direction (move daemon lifecycle out to adjacent owners) is the direction this pattern already took.
+**For what the pattern owes the kernel line: yes, and ahead of it.** The pattern's deliverable was a published, test-pinned contract and an evidence path a producer cannot shortcut, with the authoring boundary fixed in advance. That is delivered in the 5.0.1 software-baseline candidate. The kernel repository, read in full, asks for nothing from this side that is missing, and its direction (move daemon lifecycle out to adjacent owners) is the direction this pattern already took.
 
 **For the kernel line itself: Gate A done, Gate B directed but unsigned, Gate C blocked on the owner's own capture, D and E not started.** There is no schedule in the kernel repository to be on or off track against; there are gates, and the next two are the owner's.
 

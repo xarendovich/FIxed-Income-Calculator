@@ -9,7 +9,7 @@
 | Point | Verdict | Note |
 | --- | --- | --- |
 | PID-1 wording | **ACCEPT** | Corrected in README, DAEMON-CONTRACT, REVIEW-PACKAGE-V5, VERIFICATION-V5, ADVERSARIAL-REVIEW-HANDOFF-V5, ADJUDICATION-V5 |
-| G-6 (3.1.0 pilot) is distinct from contract 5.0.0 qualification | **ACCEPT** | Consistent with v5's design: a report binds the host *and* the contract digest, so a 3.1.0 run cannot be evidence for 5.0.0 by construction, not only by policy |
+| G-6 (3.1.0 pilot) is distinct from contract 5.0.1 qualification | **ACCEPT** | Consistent with v5's design: a report binds the host *and* the contract digest, so a 3.1.0 run cannot be evidence for 5.0.1 by construction, not only by policy |
 | The ten things the run must prove | **ACCEPT** | Nine are observable in the ledger, `systemctl show` and `/proc`; the tenth (no perturbation of FirstBorn/Spark workloads) needs the operator's judgement and the DB-14 resource lines |
 | `INCOMPLETE` is insufficient | **ACCEPT, with a prerequisite made explicit** | DB-08/DB-09 report UNKNOWN without `strace`, and DB-15 without `systemd-analyze`; either makes the verdict INCOMPLETE. **The DGX host needs both installed before the run** (§2) |
 | Operator procedure (FirstBorn commands and paths) | **ACCEPT as the pilot's runbook** | §3 is FirstBorn-operational (`fb unlock`, `/srv/firstborn/...`). It lives here because the gate is run there; nothing in the pattern's code or tests depends on it, which keeps the two projects unlinked. **Owner's call** whether it should move to the pilot's own repository instead |
@@ -70,13 +70,13 @@ The pattern's requirements of any host runbook. The pilot's runbook (§3, until 
 | Slot | Requirement | FirstBorn's binding (3.1.0 visit) |
 | --- | --- | --- |
 | `pattern_sha` | the pattern commit the runbook was written against | recorded in the pilot's runbook |
-| `contract_sha256` | the contract digest this visit qualifies against; a 3.1.0 run cannot be cited for 5.0.0 | 3.1.0's; 5.0.0 is `2d080b40…` |
+| `contract_sha256` | the contract digest this visit qualifies against; a 3.1.0 run cannot be cited for 5.0.1 | 3.1.0's; 5.0.1 is `26e543fd…` |
 | service user | the user whose `~` the manifest means; **never root**, never `sudo` from an operator account (HF-41) | `fb` |
 | unit name | what the real service manager instantiated (§3.5, §3.6) | `firstborn-pressure-watch.service` |
 | manifest path | the manifest the battery and the runtime bind | `/srv/firstborn/repo/host/daemons/pressure-watch/manifest.json` |
 | ledger path | read only with `tools/daemon-start.py` (§3.7) and the host's own verifier (§3.8) | `/srv/firstborn/logs/daemons/pressure-watch/ledger.jsonl` |
 | tools on the host | `strace`, `systemd-analyze` (§2) | the operator confirms in §3.1 |
-| visit | G-6 at 3.1.0, or the later 5.0.0 qualification (§5) | G-6 at 3.1.0 |
+| visit | G-6 at 3.1.0, or the later 5.0.1 qualification (§5) | G-6 at 3.1.0 |
 
 ## 3. Operator procedure (the pilot's runbook, G-6 at 3.1.0)
 
@@ -173,22 +173,20 @@ One bundle, original output preserved, nothing summarised into PASS:
 
 PASS only when all hold: `aarch64`; real host `systemd` is PID 1; battery PASS; the daemon runs as an actual systemd service; `DAEMON_START.landlock.status == "enforced"`; no unexplained Landlock gap; ledger verification succeeds; ordinary accepted cycles and heartbeats occur; no unexpected policy violation or `SENSE_BLIND`; a normal restart leaves understandable, verifiable lifecycle evidence; nothing suggests the observer perturbs FirstBorn/Spark. Otherwise the gate stays OPEN.
 
-**Two runs, kept apart:**
+**Current qualification path:**
 
 ```
-G-6 / pilot hardware proof
+if the existing 3.1.0 pilot naturally comes up during fb update
         ↓
-pressure-watch 3.1.0 on the real DGX / host systemd
+capture it as preliminary G-6 host/systemd evidence
         ↓
-closes the basic hardware/systemd uncertainty
+FirstBorn migrates directly to contract 5.0.1
         ↓
-FirstBorn migrates directly to contract 5
-        ↓
-contract 5.0.0 qualification repeated on the DGX
-   (battery run on the DGX, as the service's user; unit from `unit --report`)
+contract 5.0.1 is the gating DGX qualification
+   (battery on the DGX, as the service user; unit from `unit --report`)
 ```
 
-The 3.1.0 run must not be cited as DGX qualification evidence for contract 5.0.0.
+Do not create a separate 3.1.0 qualification campaign merely to replace it immediately afterward. A naturally occurring 3.1.0 run is useful preliminary evidence, but it must not be cited as contract 5.0.1 DGX qualification.
 
 ## 6. R-5c measurement (collect; do not act)
 
@@ -196,6 +194,6 @@ While the hardware is available, record: ledger bytes, record count, full start-
 
 ## 7. Status wording
 
-- **Before hardware evidence:** contract 5.0.0 is independently reviewed and supported by clean-checkout software evidence, but DGX Spark hardware/systemd qualification remains open.
-- **After the 3.1.0 G-6 run only:** the daemon pattern has passed its first real DGX Spark/aarch64/host-systemd run through the FirstBorn 3.1.0 pressure-watch pilot. This closes the general G-6 uncertainty but is not contract 5.0.0 DGX qualification.
-- **After a later v5 run:** contract 5.0.0 has been exercised on the DGX Spark under the real aarch64 kernel and host service manager; the evidence bundle identifies the exact contract, code, unit, `DAEMON_START` and battery result used.
+- **Before hardware evidence:** contract 5.0.1 is the software-baseline candidate and is supported by clean-checkout software evidence, but DGX Spark hardware/systemd qualification remains open.
+- **After a naturally occurring 3.1.0 G-6 run only:** record that the older FirstBorn pilot exercised the real DGX/aarch64/host-systemd boundary. It is preliminary hardware evidence only and is not contract 5.0.1 qualification.
+- **After the 5.0.1 run:** contract 5.0.1 is **DGX QUALIFIED** on the real aarch64 kernel and host service manager; the evidence bundle identifies the exact contract, code, unit, `DAEMON_START` and battery result used.
