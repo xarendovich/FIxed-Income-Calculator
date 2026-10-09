@@ -41,16 +41,22 @@ class DaemonStartToolTests(unittest.TestCase):
         tail = b'{"schema":"spark-daemon-ledger/1","seq":99'                 # a crash mid-write
         with open(self.ledger, "ab") as fh:
             fh.write(tail)
-        before = open(self.ledger, "rb").read()
+        with open(self.ledger, "rb") as fh:
+            before = fh.read()
         p = run(self.ledger)
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn(f"torn tail of {len(tail)} bytes at byte {len(before) - len(tail)}", p.stderr)
         self.assertEqual(json.loads(p.stdout)["event_type"], "DAEMON_START")
-        self.assertEqual(open(self.ledger, "rb").read(), before)               # read-only
+        with open(self.ledger, "rb") as fh:
+            self.assertEqual(fh.read(), before)                                # read-only
 
-    def test_a_bad_committed_line_is_a_clear_exit_not_a_traceback(self):
+    def test_an_unparseable_committed_line_is_a_clear_exit_not_a_traceback(self):
+        # Use syntax-invalid JSON, not a recursion-depth assumption: CPython releases differ in
+        # how deeply json.loads can parse before RecursionError. HF-43's deep-nesting behavior
+        # is tested by the actual verifiers; this extractor's contract here is simply that a
+        # committed line that cannot be parsed gets a clear exit 2.
         with open(self.ledger, "ab") as fh:
-            fh.write(b"[" * 3000 + b"]" * 3000 + b"\n")                        # HF-43's shape
+            fh.write(b"{not-json}\n")
         p = run(self.ledger)
         self.assertEqual(p.returncode, 2)
         self.assertNotIn("Traceback", p.stderr)
