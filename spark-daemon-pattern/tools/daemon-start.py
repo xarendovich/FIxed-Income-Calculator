@@ -7,7 +7,8 @@ encodes two ledger facts a host runbook must not reinvent:
 
   - the torn tail: everything after the last newline was never committed (a crash mid-write);
     the next start quarantines it. It is reported, never parsed, never an error;
-  - a line that cannot be parsed is reported with its position and exits 2, never a traceback
+  - a line that cannot be parsed, or that parses but is not a record, is reported with its
+    position and exits 2, never a traceback
     (HF-43: a deeply nested line used to crash both verifiers).
 
 It verifies nothing (no chain, no canonical check, no schema string), so it also reads the ledger
@@ -27,8 +28,10 @@ import sys
 
 def read(path):
     """(starts, torn) where starts is every DAEMON_START in order and torn is None or
-    {"offset", "length"} for an unterminated last line. Raises ValueError(seq, offset) on a
-    committed line that does not parse."""
+    {"offset", "length"} for an unterminated last line. Raises ValueError(seq, offset, why) on
+    a committed line that does not parse, or that parses but is not a record (a JSON value that
+    is not an object): on some CPython releases a deeply nested line parses, on others it does
+    not, and neither outcome may pass silently."""
     starts, offset, seq = [], 0, 0
     with open(path, "rb") as fh:
         for line in fh:
@@ -38,8 +41,10 @@ def read(path):
             try:
                 record = json.loads(line.decode("utf-8"))
             except (UnicodeDecodeError, ValueError, RecursionError):
-                raise ValueError(seq, offset) from None
-            if isinstance(record, dict) and record.get("event_type") == "DAEMON_START":
+                raise ValueError(seq, offset, "does not parse") from None
+            if not isinstance(record, dict):
+                raise ValueError(seq, offset, "parses but is not a record")
+            if record.get("event_type") == "DAEMON_START":
                 starts.append(record)
             offset += len(line)
     return starts, None
@@ -59,8 +64,8 @@ def main(argv=None) -> int:
         print(f"daemon-start: cannot read {paths[0]} ({e.__class__.__name__})", file=sys.stderr)
         return 2
     except ValueError as e:
-        seq, offset = e.args
-        print(f"daemon-start: line {seq} at byte {offset} is a committed line that does not parse; "
+        seq, offset, why = e.args
+        print(f"daemon-start: line {seq} at byte {offset} is a committed line that {why}; "
               "verify the ledger before using it as evidence", file=sys.stderr)
         return 2
     if torn:

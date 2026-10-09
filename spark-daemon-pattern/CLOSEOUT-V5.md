@@ -49,7 +49,7 @@ Every row holds. This table is evidence that the pattern sits where the kernel s
 | The ledger | Append-only hash chain, canonical JCS, one writer, two independent verifiers, cross-checked; a corrupt ledger refuses and changes nothing |
 | Six invariants | Published in the contract, each naming its checks and tests, held by `tests/test_invariants.py` |
 | The authoring boundary | Fixed before any authoring subsystem exists: describe → scaffold → envelope → precheck → validate → battery → stop; the envelope carries no authority |
-| Self-tests and batteries | 270 test methods in the tree; 264 and then 270 passed in the recorded runs on the 5.0.0 tree (`VERIFICATION-V5.md`, `evidence/v5/`), and 270 passed on the 5.0.1 tree at `97d6841` (`evidence/v5/consolidation-501/full-suite-97d6841.txt`), on Python 3.12.3 and 3.13, Landlock ABI 7; three reference batteries, 21 PASS and DB-24 N/A each. **A count in a tree is not a pass; the runs are the evidence** |
+| Self-tests and batteries | 270 test methods in the tree; 264 and then 270 passed in the recorded runs on the 5.0.0 tree (`VERIFICATION-V5.md`, `evidence/v5/`), and 270 passed on the 5.0.1 tree at `97d6841` under CPython 3.11.15 (`evidence/v5/consolidation-501/full-suite-97d6841.txt`; the interpreter was unstated until the UDC pass, which exposed HF-45 on 3.12/3.13) and 271 on 3.12.3 and 3.13.12 at the commit that fixes HF-45 (`suite-matrix.txt`), Landlock ABI 7; three reference batteries, 21 PASS and DB-24 N/A each. **A count in a tree is not a pass; the runs are the evidence** |
 | Independent review | Verification pass (HF-43, HF-44 fixed), adversarial handoff, alignment review, class-requirements review, three reviewer rounds on placement and the DGX gate, all adjudicated with the evidence stated |
 | Hardware qualification | **Not run.** The one deliverable that needs a machine (`HARDWARE-GATE-DGX.md`) |
 
@@ -74,7 +74,7 @@ Refused by this rule, with the owner named:
 | A consumer, Spark Core's reader, the activation register, the anchor | The consumer (PD-40, PD-58): the first attachment is the anchor |
 | A model reading a digest | PD-61, a kernel-side rule; nothing here |
 | A tool-head taxonomy | Not in either repository; X1's L0 |
-| A new review document | Closed. A finding goes into `HARDENING.md`; a decision goes into the owner's register |
+| A new review document | Closed for the 5.x line. The UDC track is the design review for change 3 (the 6.0.0 cut); its passes live on its branch and their adjudications (`UDC-PASS-1-ADJUDICATION.md`) are inside this rule. A finding still goes into `HARDENING.md`; a decision into the owner's register |
 
 The reviewers' habit this rule ends is the useful one: every review this week produced a document and every document produced a corrected pin somewhere else. The architecture does not need another pass of that; it needs the machine and the owner.
 
@@ -228,9 +228,9 @@ Everything in the "forced" rows a reviewer can derive from the goal without read
 | Candidate | Removes | Cost | Where |
 | --- | --- | --- | --- |
 | Drop the ledger seq from the `STATUS=` line | The contract sentence "never a clock", and the one place a ledger fact appears on the lifecycle socket | One operator convenience (`systemctl status` shows the seq) | 6.0.0, with V-1, since the 5.0.1 text now describes the seq. Recommended |
-| Fold `precheck` and `validate` into `judge --profile` | Two command names for one registry's profiles | Author habit; the names are in the authoring protocol (DAEMON-CONTRACT §7) | With R-8 packaging, after the hardware gate; not before |
+| ~~Fold `precheck` and `validate` into `judge --profile`~~ | Withdrawn 2026-10-09 (UDC pass 1, U-4): the architecture is already one judge; the names are vocabulary and removing them deletes nothing | — | Never |
 | Publish the three axioms as the invariants' preamble | Nothing; it adds a reading. Keeps I-1..I-6 as the checks | A contract text change | 6.0.0 text, if the owner wants it published; otherwise this section is enough |
-| Derive `DAEMON_ERROR_CLEARED` and `DAEMON_STOP` in readers | Two reserved events | Every reader re-derives them; a ledger schema change (`spark-daemon-ledger/2`) | Never on this line; only if the ledger schema moves for another reason |
+| ~~Derive `DAEMON_ERROR_CLEARED` and `DAEMON_STOP` in readers~~ | Withdrawn 2026-10-09: not derivable. An accepted cycle that observes no change writes nothing, so "the error ended" has no other witness; a clean stop is distinguishable from a crash only by its record (`UDC-PASS-1-ADJUDICATION.md` §3) | — | Never |
 | One consumer surface instead of `status --verify-only` plus the copyable verifier | One command | The copyable verifier is required for diversity; `status` is the operator's. Keep both | Not a simplification; recorded so it is not proposed again |
 
 The rule for all of them is the closing rule: nothing before the DGX, and anything that changes a published word rides 6.0.0 or never.

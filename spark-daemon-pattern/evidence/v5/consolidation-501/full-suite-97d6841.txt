@@ -1,3 +1,6 @@
+# Full suite at 97d6841 (contract 5.0.1). Interpreter: the container's default python3 = CPython 3.11.15 (Linux 6.18.44, Landlock ABI 7).
+# Correction 2026-10-09: the interpreter was unstated when this was recorded. On 3.12/3.13 the old test_tools deep-JSON case fails (HF-45);
+# see suite-matrix.txt for the 3.12.3 and 3.13.12 runs at the commit that fixes it.
 ..................................................................................................................................................................................................................................................................../home/user/udc-worktree/spark-daemon-pattern/tests/test_tools.py:44: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/spark-selftest-h0t19_yf/home/out/counter/ledger.jsonl'>
   before = open(self.ledger, "rb").read()
 ResourceWarning: Enable tracemalloc to get the object allocation traceback

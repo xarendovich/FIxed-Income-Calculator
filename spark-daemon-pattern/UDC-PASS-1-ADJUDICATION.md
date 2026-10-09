@@ -1,0 +1,76 @@
+# Adjudication: UDC review pass 1
+
+- **Asked:** the owner forwarded the first pass of the Universal Daemon Contract review (`UDC-LOGICAL-FRAMEWORK-REVIEW.md`, `UDC-REVIEW-PASS-1.md`, draft PR 3 on the `Universal-Daemon-Contract-(UDC)` branch) and asked for it to be deliberated. Every claim below was checked against the code at `673ad2c` plus the cherry-picked test repair, not against the review's own text.
+- **Standing:** Claude's verdicts, subject to the owner. The 5.0.1 bytes are not touched. The closing rule in `CLOSEOUT-V5.md` §4 admits defect fixes and the 6.0.0 cut; the UDC track is the design review *for* that cut, so adjudicating its passes is inside the rule, not an exception to it.
+- **In one line:** the pass is right on every finding, under-states its first one, and its charter's compression rule ("one fact, one owner") is the correct reading of the history. Two things were found underneath it here: a real extractor defect the CI failure was masking (HF-45, fixed), and an unstated interpreter in this package's own evidence (corrected).
+
+## 1. Findings and simplifications, one verdict each
+
+| Item | Reviewer's position | Verdict | Checked against |
+| --- | --- | --- | --- |
+| **UDC-F1** `list_dir` returns a partial listing with `truncated=True`; I-2 then depends on the author | **ACCEPT, and it is stronger than stated.** The published I-2 says "a truncated read abandons the cycle" and its `enforced_in` line says "ctx raising on truncation". That is true of `read_text` (`TooLarge`) and false of `list_dir`. So this is not only an ownership defect; the contract's own enforcement claim over-states for one method, which is L2 applied to the contract text itself | `contract.py` I-2; `context.py` `read_text` raises, `list_dir` marks; `dir-watch` checks the flag; the FirstBorn pilot does not call `list_dir` |
+| F1 resolution: `list_dir` raises `TooLarge` when an entry exists beyond the cap; `Listing.truncated` disappears | **ACCEPT for 6.0.0.** A successful listing is complete by construction; the author cannot hold a state I-2 forbids. It is MAJOR by the contract's rule (a daemon that emitted from a partial listing would now fail that cycle). Only one `ctx` method has this shape; `stat` and `disk_usage` have no cap | `context.py` |
+| F1 before the baseline: narrow I-2 now, or fix the API now | **MODIFY: record now, change nothing in 5.0.1.** Recorded as residual risk 7 in `HARDENING.md`. The three reference daemons and the pilot are unaffected (one uses `list_dir` and raises; the rest do not call it). A 5.0.2 that narrows an invariant's claim would pin a weaker contract for hardware; a 6.0.0 that makes the claim true by construction is the better bytes to qualify next. If the owner prefers the words corrected before the DGX visit, it is a PATCH and a re-pin, nothing more | `HARDENING.md` residual 7 |
+| The principle: "don't give the author a state the invariant says must never be accepted" | **ACCEPT as a design rule.** It is the author-API corollary of L2 and of the charter's compression rule: a flag the author must check is a second owner of one fact | — |
+| **UDC-F2** start-up "counts as accepted" conflates two facts | **ACCEPT.** The code already models the reviewer's version: the blind clock anchors on `last_accepted_utc or first_start_utc`, and `last_accepted_utc` stays `None` until an accepted cycle. Only the contract words (`contract.py` "start-up counts as accepted") and the runtime docstring say otherwise | `semantics.py` line 90; `runtime.py` docstring |
+| F2 behaviour: report `blind` while no accepted observation is evidenced; no new state | **ACCEPT for 6.0.0.** `observing` requires an evidenced accepted observation; otherwise `blind` with its reason, from the existing vocabulary. Cost, stated: after every fresh start `status` says `blind` for up to one heartbeat interval, which is what is true, and which PD-01.3's half-limit rule already does for a running daemon | `semantics.py` `interpret` states |
+| **U-2** move the candidate envelope out of core; retire DB-24 | **ACCEPT for 6.0.0.** Verified: the envelope is read only by DB-24 (N/A without it, N/A does not block PASS) and the author tool; the report already records what was judged. PD-62 (producer identity never raises trust) survives as a rule of the author tool and of the KU-33 row, where it already lives. The report's `candidate` section and the kernel candidate's "Agent head" row follow it out | `judge.py` 177–191, 463; `battery.py` 769 |
+| **U-1** `daemon_class`, `network.mode`, `trigger.kind` each admit one value | **ACCEPT for 6.0.0.** Verified: `("observe",)`, `("none",)`, `("poll",)`. This is L1 made structural: a capability change becomes a new contract identity, never an enum flip. Manifest schema 5 drops the three fields and lifts `interval_seconds`; the field-by-field migration message is the existing mechanism. It also simplifies KU-33's exclusions: "`act` and `named` stay reserved" becomes "no such field exists" | `manifest.py` 268, 274, 291 |
+| **U-7** `digest.enabled` and `digest()` are two owners of one fact | **ACCEPT, and go one field further.** Verified the odd state (`enabled: true`, no `digest()`: DB-10 N/A, no digest). The simplest shape deletes `digest` from the manifest entirely: `digest()` present is the fact, and the size bound becomes a contract constant. Every current consumer declares 8192 or 16384 (three examples, the pilot); a 16 KiB constant covers all four. A daemon that needs more is using the digest as a data channel, which is the misuse the "non-authoritative projection" name exists to prevent | `manifest.py` 354–360; `runtime.py` 405; the four manifests |
+| **U-3** keep `digest.md` | **AGREE.** The reference daemons show why: current values inside an unchanged band are deliberately not events. "Non-authoritative operator projection" is the right name; the render is already contained (DB-10) | `examples/*/daemon.py` |
+| **U-4** keep the three judge names | **AGREE.** One registry, one verdict rule, one report, nested profiles; the names are vocabulary. The fold proposed in `CLOSEOUT-V5.md` §8.4 is withdrawn there | `judge.py` PROFILES |
+| **U-5** keep purity and the audit hook beside Landlock | **AGREE.** PD-101 says the same: the kernel is the boundary, the tripwires are diagnostics with distinct jobs (reviewability; a recorded attempt; process-creation surfaces Landlock does not cover). DB-17's record-only mode exists so Landlock can be proven alone | `guard.py`, DB-17 |
+| **U-8** user-unit support | **ACCEPT for 6.0.0; the census is done.** Every consumer is a system unit: the three examples and the FirstBorn pilot (`run_as.unit: system`). No user-unit consumer exists. Delete the branch: `run_as.unit` goes, `run_as.user` stays, the unit generator has one shape, and host qualification narrows to it | the four manifests; `unitgen.py` 125, 150, 293 |
+| Platform scope: do not abstract Linux/systemd/Landlock | **AGREE.** "Universal" means one contract for every observe-only resident component on this host class, not portability | — |
+| The four-law model (L1–L4) under the six invariants | **ACCEPT as the conceptual model**, with the six invariants kept, by the charter's own rule (every check keeps one obvious parent). Mapping to `CLOSEOUT-V5.md` §8.2: L2 is Honest; L3 and L4 are Judged split into identity-and-bounds and authority; L1 is Harmless **plus the versioning law the three axioms lacked**: a capability may only change by changing the contract identity. That addition is what U-1 implements | `CLOSEOUT-V5.md` §8 |
+| CI: the extractor test assumed deep JSON must raise | **ACCEPT; cherry-picked** as `d2d7545`. Verified: 3,000 levels raise `RecursionError` on 3.10 and 3.11 and parse on 3.12 and 3.13 | four interpreters here |
+
+## 2. Found underneath the CI failure
+
+**HF-45 (fixed in this commit).** On 3.12 and 3.13 the deep line parses to a JSON list, and `tools/daemon-start.py` then *skipped it silently and exited 0*: it looked only for objects whose `event_type` is `DAEMON_START` and ignored everything else. A committed line that is not an object is not a record, and the tool's contract is that a bad committed line exits 2. The reviewer's repaired test could not see this because it uses syntax-invalid JSON. Fix: a parsed non-object line raises the same `ValueError` path with the reason "parses but is not a record". Regression test runs three shapes (the deep line, a list, a string) and passes on 3.10, 3.11, 3.12 and 3.13. Both verifiers were already safe on all four: `canonical_bytes` refuses the depth with `CanonicalError("nesting too deep")` whether or not `json.loads` parsed it, verified here on each interpreter.
+
+**An unstated interpreter in this package's evidence (corrected).** The recorded 270-test runs at `6ab59a0` onward, including the one at `97d6841`, ran under the container's default `python3`, which is 3.11.15, and said so nowhere. On 3.11 the old extractor test passed; on 3.12 and 3.13 it failed exactly as the reviewer's CI showed. The evidence header now names the interpreter, and a full run on 3.12.3 and 3.13.12 at this commit is recorded beside it (`evidence/v5/consolidation-501/suite-matrix.txt`). The rule that follows: every recorded run names its interpreter, and the matrix is the evidence, not one run.
+
+## 3. Answers for pass 2
+
+The reviewer's six questions, answered from the code so pass 2 can start from counterexamples rather than from a census.
+
+**Which manifest fields affect enforcement, and which are identity or presentation?** The fifteen top-level keys, by owner:
+
+| Owner after 6.0.0 | Fields | What reads them |
+| --- | --- | --- |
+| Identity | `manifest_schema`, `name`, `version`, `purpose` | the digest, the unit name, the report; nothing enforces them |
+| Observation semantics (enforced by the runtime) | `reads`, `interval_seconds` (lifted from `trigger`), `cycle_budget_seconds`, `blind_limit_seconds`, `ledger.event_types`, `ledger.record_max_bytes` | `PathPolicy`, the cycle alarm, the blind clock, the writer |
+| Host binding (enforced by the unit and Landlock) | `output_dir`, `run_as.user`, `resources` | the unit generator, the Landlock grants, `PathPolicy` |
+| Profile-implied, deleted by U-1 | `daemon_class`, `network`, `trigger.kind` | nothing but the validator that refuses other values |
+| Duplicate, deleted by U-7 | `digest` | `render` (bound becomes a constant) |
+
+**Are the heartbeat and the systemd watchdog duplicates?** No; they prove different facts. The watchdog ping proves the main loop reached notify within 2×budget+10 and lets the host kill a hung loop; it is volatile and leaves no record. The heartbeat is a durable ledger fact that carries the blind anchor and `last_accepted_utc` across restarts (HF-32, HF-34); without it a restarted daemon could not know how long it had been blind. Keep both.
+
+**Is any lifecycle event derivable?** No, and this corrects a candidate in `CLOSEOUT-V5.md` §8.4. `DAEMON_ERROR_CLEARED` cannot be derived because an accepted cycle that observes no change writes nothing: the ledger is sparse by design, so "the error ended" has no other witness. `DAEMON_STOP` distinguishes a clean stop from a crash (which is an absence) and carries the blind anchor. The six stay.
+
+**Is the status vocabulary minimal?** Five states: `never_started`, `stopped`, `not_watching`, `blind`, `observing`. Each answers a different question (any record? ended on purpose? anyone vouching? alive but not seeing? seeing?). F2 changes what `observing` requires, not the set.
+
+**Does any output artifact hold data derivable from the ledger or report?** The output directory holds the ledger (authoritative), `digest.md` (a projection, kept per U-3) and the run lock (a host fact, no data). Nothing else.
+
+**Can host and deployment inputs be separated from observation semantics?** Not into a second document. The unit is a projection of the manifest, and the runtime gate pins the unit's inputs by the manifest digest; a second document would need a second digest and the two would have to agree, which is the drift the history keeps deleting (HF-37, HF-39, the battery's manifest copy). The right form is the table above: one document, fields tagged by owner in the schema, two readers. "One document, two readers" beats "two documents, one agreement check".
+
+## 4. The 6.0.0 cut, as it now stands
+
+One MAJOR, one DGX re-qualification, deletions first so that the bundle V-1 hashes is the smallest one:
+
+1. U-2: envelope and DB-24 to the author tool; the report's `candidate` section goes with them.
+2. U-1: `daemon_class`, `network`, `trigger.kind` deleted; `interval_seconds` top-level; manifest schema 5.
+3. U-7: `digest` deleted from the manifest; `digest()` presence is the fact; a 16 KiB constant bound.
+4. U-8: `run_as.unit` deleted; system units only.
+5. F1: `list_dir` all-or-fail; `Listing.truncated` deleted; I-2's claim becomes true by construction.
+6. F2: `observing` requires an evidenced accepted observation; contract and docstring words corrected.
+7. V-1: `runtime_bundle_sha256` over the runtime entrypoint, `spark_daemon/` and the independent verifier, bound as the fourth expected digest. The extractor stays outside the bundle; it is a consumer's tool.
+
+FirstBorn migrates twice (3.1.0 → 5.0.1 for the hardware gate, then 6.0.0 once), and the field-by-field migration messages carry both hops. Nothing in this list goes in before the 5.0.1 DGX qualification; that is the stop line in both the charter and `CLOSEOUT-V5.md` §4.
+
+## 5. For the owner
+
+1. F1 and F2 before the DGX visit: record only (recommended), or a 5.0.2 wording PATCH and a re-pin. Either is honest; the first qualifies better bytes sooner.
+2. Confirm the 6.0.0 composition in §4 as one cut.
+3. PR 3's base is this branch at `673ad2c`; it will need `d2d7545` (the cherry-pick) and this commit merged, or it re-applies the same two-line test change. No conflict in content.

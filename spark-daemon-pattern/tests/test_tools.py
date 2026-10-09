@@ -62,6 +62,26 @@ class DaemonStartToolTests(unittest.TestCase):
         self.assertNotIn("Traceback", p.stderr)
         self.assertIn("does not parse", p.stderr)
 
+    def test_a_committed_line_that_is_not_a_record_is_a_clear_exit_on_every_python(self):
+        # HF-45. A deeply nested line (HF-43's shape) raises RecursionError in json.loads on
+        # CPython 3.10/3.11 and parses to a list on 3.12+/3.13. Before the fix the second case
+        # was skipped silently (exit 0): a committed line that is not an object is not a record
+        # and must be reported like one that does not parse, whichever way the parser went.
+        for bad in (b"[" * 3000 + b"]" * 3000 + b"\n", b"[1, 2, 3]\n", b'"a string"\n'):
+            with self.subTest(line=bad[:12]):
+                with open(self.ledger, "rb") as fh:
+                    good = fh.read()
+                with open(self.ledger, "ab") as fh:
+                    fh.write(bad)
+                try:
+                    p = run(self.ledger)
+                    self.assertEqual(p.returncode, 2, p.stderr)
+                    self.assertNotIn("Traceback", p.stderr)
+                    self.assertRegex(p.stderr, "does not parse|parses but is not a record")
+                finally:
+                    with open(self.ledger, "wb") as fh:
+                        fh.write(good)
+
     def test_no_start_no_file_and_a_renamed_schema(self):
         empty = os.path.join(self.sb.tmp, "empty.jsonl")
         open(empty, "w").close()
