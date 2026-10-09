@@ -1,0 +1,42 @@
+# PublishedContractTests at 97d6841 (contract 5.0.1), 2026-10-09T14:58:37Z, Linux 6.18.44-fc-v80
+== python3.10 3.10.20
+test_committed_contract_matches_the_running_rules (test_handoff.PublishedContractTests) ... ok
+test_committed_schema_matches_the_running_validator (test_handoff.PublishedContractTests) ... ok
+test_contract_is_identical_on_every_installed_python (test_handoff.PublishedContractTests) ... ok
+test_contract_names_every_ctx_method_and_battery_check (test_handoff.PublishedContractTests) ... ok
+test_contract_version_is_pinned_to_its_sha (test_handoff.PublishedContractTests)
+test_describe_cli (test_handoff.PublishedContractTests) ... ok
+Ran 6 tests in 0.673s
+OK
+== python3.11 3.11.15
+test_committed_contract_matches_the_running_rules (test_handoff.PublishedContractTests.test_committed_contract_matches_the_running_rules) ... ok
+test_committed_schema_matches_the_running_validator (test_handoff.PublishedContractTests.test_committed_schema_matches_the_running_validator) ... ok
+test_contract_is_identical_on_every_installed_python (test_handoff.PublishedContractTests.test_contract_is_identical_on_every_installed_python) ... ok
+test_contract_names_every_ctx_method_and_battery_check (test_handoff.PublishedContractTests.test_contract_names_every_ctx_method_and_battery_check) ... ok
+test_contract_version_is_pinned_to_its_sha (test_handoff.PublishedContractTests.test_contract_version_is_pinned_to_its_sha)
+test_describe_cli (test_handoff.PublishedContractTests.test_describe_cli) ... ok
+Ran 6 tests in 0.564s
+OK
+== python3.12 3.12.3
+test_committed_contract_matches_the_running_rules (test_handoff.PublishedContractTests.test_committed_contract_matches_the_running_rules) ... ok
+test_committed_schema_matches_the_running_validator (test_handoff.PublishedContractTests.test_committed_schema_matches_the_running_validator) ... ok
+test_contract_is_identical_on_every_installed_python (test_handoff.PublishedContractTests.test_contract_is_identical_on_every_installed_python) ... ok
+test_contract_names_every_ctx_method_and_battery_check (test_handoff.PublishedContractTests.test_contract_names_every_ctx_method_and_battery_check) ... ok
+test_contract_version_is_pinned_to_its_sha (test_handoff.PublishedContractTests.test_contract_version_is_pinned_to_its_sha)
+test_describe_cli (test_handoff.PublishedContractTests.test_describe_cli) ... ok
+Ran 6 tests in 0.548s
+OK
+== python3.13 3.13.12
+test_committed_contract_matches_the_running_rules (test_handoff.PublishedContractTests.test_committed_contract_matches_the_running_rules) ... ok
+test_committed_schema_matches_the_running_validator (test_handoff.PublishedContractTests.test_committed_schema_matches_the_running_validator) ... ok
+test_contract_is_identical_on_every_installed_python (test_handoff.PublishedContractTests.test_contract_is_identical_on_every_installed_python) ... ok
+test_contract_names_every_ctx_method_and_battery_check (test_handoff.PublishedContractTests.test_contract_names_every_ctx_method_and_battery_check) ... ok
+test_contract_version_is_pinned_to_its_sha (test_handoff.PublishedContractTests.test_contract_version_is_pinned_to_its_sha)
+test_describe_cli (test_handoff.PublishedContractTests.test_describe_cli) ... ok
+Ran 6 tests in 0.544s
+OK
+== identity
+{
+  "contract_version": "5.0.1",
+  "contract_sha256": "26e543fd8b36dd1d945be953c12d705c306adaa7cddf1cc2d24b893eff09dd16"
+}

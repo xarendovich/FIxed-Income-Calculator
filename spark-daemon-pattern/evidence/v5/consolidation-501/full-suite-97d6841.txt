@@ -1,0 +1,11 @@
+..................................................................................................................................................................................................................................................................../home/user/udc-worktree/spark-daemon-pattern/tests/test_tools.py:44: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/spark-selftest-h0t19_yf/home/out/counter/ledger.jsonl'>
+  before = open(self.ledger, "rb").read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/home/user/udc-worktree/spark-daemon-pattern/tests/test_tools.py:49: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/spark-selftest-h0t19_yf/home/out/counter/ledger.jsonl'>
+  self.assertEqual(open(self.ledger, "rb").read(), before)               # read-only
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+..........
+----------------------------------------------------------------------
+Ran 270 tests in 153.401s
+
+OK

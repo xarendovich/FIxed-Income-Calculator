@@ -2,6 +2,7 @@
 
 - **As of:** 2026-10-09, contract 5.0.1 candidate, digest `26e543fd8b36dd1d945be953c12d705c306adaa7cddf1cc2d24b893eff09dd16`.
 - **Scope:** the active pattern is a small deterministic resident observer below the Spark kernel. It is host-managed, observe-only, runs no program, uses no network, and produces verified local facts without authority.
+- **Closed to growth:** `CLOSEOUT-V5.md` §4 and `CONSOLIDATION-5.0.1.md` §9 are one stop line; this roadmap lists what remains and nothing is added to it.
 - **Kernel source:** `xarendovich/Kernel-Update` at `ddec911` remains the comparison point for §3 and §4. Its direction is to move daemon/process lifecycle concerns out to adjacent owners, not into the Spark kernel.
 
 ## 1. Where the pattern stands

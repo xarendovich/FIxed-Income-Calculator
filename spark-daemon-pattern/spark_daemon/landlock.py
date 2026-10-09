@@ -25,7 +25,7 @@ ADJUDICATION-AP.md, AP-01, for the full table across ABI 1/3/4/7):
   - stat() of a denied path (existence and metadata are still visible).
   - UDP traffic, or anything before ABI 4 (Landlock's network rules did not exist yet).
 
-Policy PD-15 (unresolved pending Class C): Landlock unavailable, or older than
+Policy PD-15 (an owner ruling, unresolved): Landlock unavailable, or older than
 MIN_USABLE_ABI, is a start-up refusal (apply_supervisor_domain raises). Since contract 5
 there is no test mode that tolerates it: the self-tests and the battery need a kernel with
 Landlock too, and DB-17's probe reports N/A on one without it.
