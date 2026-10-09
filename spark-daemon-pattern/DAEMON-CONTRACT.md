@@ -94,6 +94,17 @@ No change may relax any of these. Each is enforced in one place; the checks and 
 | I-5 | It runs only what was judged, and judging is not activation: the installable unit is a projection of a qualifying report made on this host, the runtime refuses files that differ from the unit's digests, and nothing here installs or enables a unit | judge.conclusions and `unit --report` when installing; the runtime's digest gate at every start | DB-24 | owner 1, owner 7, INV-7 |
 | I-6 | Bounded: one budget for each whole cycle, every unit timing derived from it, and restart decided by the exit class | the cycle's alarm (runtime.py); timings derived from cycle_budget_seconds (manifest.py, unitgen.py); RestartPreventExitStatus from NO_RESTART_EXIT_CODES | DB-14, DB-25 | owner 6, INV-8, INV-9 |
 
+## 5b. Declared losses for 4.0.0 callers (at contract 5.0.0)
+
+Recorded 2026-10-09 at the reviewers' request. Contract 5.0.0 made two changes that break a 4.0.0 caller's scripts on purpose, with no compatibility shim, because a shim would be a second owner of one fact. They are **declared losses**, not regressions:
+
+| Loss | What changed | What a 4.0.0 caller sees |
+| --- | --- | --- |
+| **Profile-name swap** | `precheck` and `validate` exchanged meanings so the profiles nest as they run: `precheck` ⊂ `validate` ⊂ `battery`, one registry | The command that used to be the cheaper one is now the dearer one; the CLI prints a `RENAMED` notice naming both (`judge.RENAMED`), and the report's `profile` field says which ran |
+| **Report collapse** | Four result shapes became one facts-only report, `spark-daemon-report/1`; the verdict and `qualifies` are derived on read; `--emit-unit`, the qualification record and the stored `qualified` flag are gone; `verify` is `status --verify-only`; `scaffold` and `envelope` moved to `spark-daemon-author` | Parsers of the old shapes fail; `verify`, `scaffold` and `envelope` print a `MOVED` notice (exit 2) saying where they went |
+
+Both are recorded in `contract/versions.json` by the 5.0.0 digest and in `evidence/v5/cut2-accounting.md`; neither changes what a daemon may do. A 4.0.0 manifest is told field by field what changed (schema 3 → 4); these two losses concern callers of the tooling, not authors of daemons.
+
 ## 6. Three lanes of evidence
 
 | Lane | Cost | Checks | Answers | Admissible for activation |

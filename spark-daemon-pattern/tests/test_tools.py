@@ -81,6 +81,14 @@ class DaemonStartToolTests(unittest.TestCase):
                 finally:
                     with open(self.ledger, "wb") as fh:
                         fh.write(good)
+        # And when the non-record is the ONLY committed line: before the fix this was exit 1
+        # ("no DAEMON_START"), also wrong; it is a bad line, so exit 2.
+        only = os.path.join(self.sb.tmp, "only-bad.jsonl")
+        with open(only, "wb") as fh:
+            fh.write(b"[1, 2, 3]\n")
+        p = run(only)
+        self.assertEqual(p.returncode, 2, p.stderr)
+        self.assertIn("parses but is not a record", p.stderr)
 
     def test_no_start_no_file_and_a_renamed_schema(self):
         empty = os.path.join(self.sb.tmp, "empty.jsonl")

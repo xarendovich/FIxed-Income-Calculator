@@ -55,22 +55,44 @@ The reviewer's six questions, answered from the code so pass 2 can start from co
 
 **Can host and deployment inputs be separated from observation semantics?** Not into a second document. The unit is a projection of the manifest, and the runtime gate pins the unit's inputs by the manifest digest; a second document would need a second digest and the two would have to agree, which is the drift the history keeps deleting (HF-37, HF-39, the battery's manifest copy). The right form is the table above: one document, fields tagged by owner in the schema, two readers. "One document, two readers" beats "two documents, one agreement check".
 
-## 4. The 6.0.0 cut, as it now stands
+## 4. The 6.0.0 cut, as it now stands (bounds from the second deliberation folded in)
 
-One MAJOR, one DGX re-qualification, deletions first so that the bundle V-1 hashes is the smallest one:
+One MAJOR, one DGX re-qualification, deletions first so that the bundle V-1 hashes is the smallest one. Each item carries the bound that keeps it from growing:
 
-1. U-2: envelope and DB-24 to the author tool; the report's `candidate` section goes with them.
-2. U-1: `daemon_class`, `network`, `trigger.kind` deleted; `interval_seconds` top-level; manifest schema 5.
-3. U-7: `digest` deleted from the manifest; `digest()` presence is the fact; a 16 KiB constant bound.
-4. U-8: `run_as.unit` deleted; system units only.
-5. F1: `list_dir` all-or-fail; `Listing.truncated` deleted; I-2's claim becomes true by construction.
-6. F2: `observing` requires an evidenced accepted observation; contract and docstring words corrected.
-7. V-1: `runtime_bundle_sha256` over the runtime entrypoint, `spark_daemon/` and the independent verifier, bound as the fourth expected digest. The extractor stays outside the bundle; it is a consumer's tool.
+1. **U-2:** envelope and DB-24 to the author tool; the report's `candidate` section goes with them. *Bounds:* PD-62 (producer kind is provenance, never trust) stays a rule **of the author tool, in this same cut**; KU-33 is a PENDING candidate and is not a home for it. **I-5's check list, which today reads `["DB-24"]`, is rewritten in the same commit**, or an invariant points at a retired id.
+2. **U-1:** `daemon_class`, `network`, `trigger.kind` deleted; `interval_seconds` top-level; manifest schema 5. *Bounds:* this does not withdraw the PD-01 class ladder; the next class is a **new contract identity** (the versioning law). The contract body's `reserved` map (`act`, `named`, `inotify-wakeup`) is deleted in the same cut, or it is a ghost field. No `PROPOSAL` event in this increment.
+3. **U-7:** `digest` deleted from the manifest; `digest()` presence is the fact; a 16 KiB bound. *Bounds:* the bound is a **pattern constant**, not a transport-contract `Bounds` field and not a sixth bound of anything. `digest.md` stays a non-authoritative projection and is **not an attachment surface**: a consumer attaches on verified ledger facts through `status` or the verifier, never on `digest.md`, never by subscription.
+4. **U-8:** `run_as.unit` deleted; system units only.
+5. **F1:** `list_dir` all-or-fail; `Listing.truncated` deleted; I-2's claim becomes true by construction.
+6. **F2:** `observing` requires an evidenced accepted observation; the contract and docstring words corrected. *Bound:* that `blind` is a **status word**; it is not `SENSE_BLIND`, exits nothing, and a heartbeat is still not "I can see".
+7. **Words in the 6.0.0 text:** I-1 says "Landlock and the systemd unit enforce it", not "the kernel enforces it"; the Spark kernel takes no dependency and gains no daemon state.
+8. **V-1:** `runtime_bundle_sha256` bound as the fourth expected digest. *Bounds:* the input is a **frozen file list** (the runtime entrypoint, `spark_daemon/`, `verifier/ledger_verify.py`), not a directory that can grow; tests, evidence, prose and authoring tools stay out. It proves the Python enforcer and **nothing about the host**: Landlock ABI, the installed unit and systemd as PID 1 stay G-6 evidence, and root-owned read-only installation stays the mitigation until both pins exist. It strengthens I-5; it is not I-7, not a second hierarchy, not a kernel pillar.
+9. **The extractor's standing (M-2, decided here):** `tools/daemon-start.py` is **dropped from the mandated read path**. N-19 names two fact surfaces, `status` and the independent verifier; the extractor is the hardware-gate evidence tool for one record and verifies nothing, so it is outside the bundle on purpose. Its digest is recorded in the DGX evidence bundle beside the files it read, as evidence hygiene, not as an admission pin. Tool exit 2 is a reader's refusal, never the ledger's exit 65.
+
+**The residual-5 receipt, restated so the cut cannot grow a write for it:** the consumer writes the receipt, outside the daemon's writable domain; the daemon grows no write to place it; it detects rollback after that point; it is not a grant, not a checkpoint file beside the ledger, not an authority subsystem, and it cannot prove the pre-attachment prefix.
+
+**What the cut must not create:** a Spark Core attachment. Spark Core has none, by design on both sides; the daemon keeps denying `~/spark-core/data`; the first Spark-side reader, when one exists, is a State/Event pull of verified facts after the owner row is recorded. Nothing in items 1–9 builds it.
 
 FirstBorn migrates twice (3.1.0 → 5.0.1 for the hardware gate, then 6.0.0 once), and the field-by-field migration messages carry both hops. Nothing in this list goes in before the 5.0.1 DGX qualification; that is the stop line in both the charter and `CLOSEOUT-V5.md` §4.
 
 ## 5. For the owner
 
-1. F1 and F2 before the DGX visit: record only (recommended), or a 5.0.2 wording PATCH and a re-pin. Either is honest; the first qualifies better bytes sooner.
+1. F1 and F2 before the DGX visit: **record only, with residual 7 named on the evidence row beside the contract digest** (now written into `HARDWARE-GATE-DGX.md` §4). A 5.0.2 only if the visit cannot carry a known over-statement.
 2. Confirm the 6.0.0 composition in §4 as one cut.
-3. PR 3's base is this branch at `673ad2c`; it will need `d2d7545` (the cherry-pick) and this commit merged, or it re-applies the same two-line test change. No conflict in content.
+3. PR 3's base is this branch at `673ad2c`; it will need `d2d7545` (the cherry-pick) and the commits since merged, or it re-applies the same two-line test change. Content conflict is not the risk; shipping the extractor fix without M-2's standing decided was, and §4 item 9 decides it.
+
+## 6. The second deliberation (2026-10-09), adjudicated
+
+A second reviewer read the pass-1 adjudication against the `165aa17` tree (not `f59a30a`) and returned ADOPT WITH MODIFICATIONS: four bounds and one omission. Each, checked against the current tree:
+
+| Item | Reviewer | Verdict here | Done |
+| --- | --- | --- | --- |
+| **M-1** record-only before DGX is acceptable only if the hardware row names the over-statement | Right. A PASS read alone would be read as I-2 holding | **ACCEPT.** `HARDWARE-GATE-DGX.md` §4 now says the bundle names the residuals open at the qualified digest, residual 7 among them, and §7's status wording carries it. F2's `blind` is a status word, not `SENSE_BLIND`, written into §4 item 6 | Yes |
+| **M-2** the extractor is outside the bundle yet on the mandated read path; pin it or drop it | Right, and the choice had not been made | **ACCEPT: drop.** The extractor is a hardware-gate evidence tool and verifies nothing; the fact surfaces are `status` and the independent verifier. Its digest is recorded in the evidence bundle as hygiene. HF-45 widened: the only-committed-line case exited 1, also wrong; now exit 2, tested on four interpreters. Tool exit 2 is never spoken as ledger exit 65 | Yes (§4 item 9; `HARDENING.md`; `test_tools`) |
+| **M-3** the bundle hash is a frozen file list and does not prove the host | Right | **ACCEPT.** Written into §4 item 8 | Yes |
+| **M-4** PD-62 stays in the author tool in the same cut; I-5's check list stops pointing at DB-24; the `reserved` map goes in the same cut as U-1 | Right on all three; verified: I-5 `checks` is `["DB-24"]` today and the `reserved` map is at `contract.py` line 322 | **ACCEPT.** Written into §4 items 1 and 2 | Yes |
+| **M-5** the 16 KiB bound is a pattern constant, not a transport bound; `digest.md` is not the attachment; the receipt is consumer-written | Right | **ACCEPT.** Written into §4 item 3 and the receipt paragraph | Yes |
+| **M-6** the ordered wording cut is still missing: split the Class C words; retarget the LTC note at `utc/` and mark PD-82 unbuilt; record the profile-name swap and the report collapse as declared losses; I-1 should say Landlock and the unit | **Partly already done, the rest done now.** The Class C split landed in 5.0.1 (`97d6841`, "owner activation decision"), which the reviewer's `165aa17` tree predates. The LTC note is retargeted in `README.md` (the LTC is since the UTC, `utc/`, vendored in FirstBorn at Spark-Core `61b7754a`; PD-82 adopted as a rule, unbuilt while `network.mode` admits only `none`). The two declared losses are recorded in `DAEMON-CONTRACT.md` §5b. I-1's wording is §4 item 7 for the 6.0.0 text | Yes, except I-1's words, which are a contract-text change and ride 6.0.0 |
+| The stack table: nothing in the cut creates a Spark Core attachment | Right | **ACCEPT.** Written into §4 | Yes |
+
+One correction to the reviewer's note: it says the hardware PASS "does not fill the UTC owner row"; agreed, and nothing here claims it does. The owner row this pattern waits on is KU-33, a different register.

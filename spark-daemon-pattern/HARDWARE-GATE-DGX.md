@@ -169,6 +169,8 @@ One bundle, original output preserved, nothing summarised into PASS:
 
 1. `uname -m`; 2. `uname -r`; 3. `/etc/os-release`; 4. `python3 --version`; 5. `systemctl --version` and the PID-1 proof; 6. cgroup mode; 7. the exact FirstBorn Git SHA; 8. the exact daemon contract/version used; 9. the complete battery output and report; 10. the generated/installed unit's identity; 11. `systemctl status`/`show` output; 12. MainPID and `/proc/<pid>/cgroup`; 13. the complete `DAEMON_START` record; 14. explicitly: `landlock.status`, `landlock.abi`, `landlock.gaps`; 15. the ledger verification result; 16. a short ledger tail after ordinary running; 17. the restart result and the post-restart verification; 18. every failure, UNKNOWN, N/A or warning exactly as emitted (DB-24 N/A with no envelope is expected and explained).
 
+**Residuals ride with the digest.** The bundle's contract line names the residual risks open at that digest, by number, from `HARDENING.md`. At 5.0.1 that is residuals 2, 3, 5, 6 and **7**: a PASS does not show that `list_dir` abandons a truncated read (the generic API marks, the author must abandon; `dir-watch` does, the pilot never lists). A hardware PASS is read as I-2 holding only with that row beside it. The 3.1.0 pilot's evidence, if any, carries the same rule for its own digest.
+
 ## 5. Acceptance
 
 PASS only when all hold: `aarch64`; real host `systemd` is PID 1; battery PASS; the daemon runs as an actual systemd service; `DAEMON_START.landlock.status == "enforced"`; no unexplained Landlock gap; ledger verification succeeds; ordinary accepted cycles and heartbeats occur; no unexpected policy violation or `SENSE_BLIND`; a normal restart leaves understandable, verifiable lifecycle evidence; nothing suggests the observer perturbs FirstBorn/Spark. Otherwise the gate stays OPEN.
@@ -196,4 +198,4 @@ While the hardware is available, record: ledger bytes, record count, full start-
 
 - **Before hardware evidence:** contract 5.0.1 is the software-baseline candidate and is supported by clean-checkout software evidence, but DGX Spark hardware/systemd qualification remains open.
 - **After a naturally occurring 3.1.0 G-6 run only:** record that the older FirstBorn pilot exercised the real DGX/aarch64/host-systemd boundary. It is preliminary hardware evidence only and is not contract 5.0.1 qualification.
-- **After the 5.0.1 run:** contract 5.0.1 is **DGX QUALIFIED** on the real aarch64 kernel and host service manager; the evidence bundle identifies the exact contract, code, unit, `DAEMON_START` and battery result used.
+- **After the 5.0.1 run:** contract 5.0.1 is **DGX QUALIFIED** on the real aarch64 kernel and host service manager; the evidence bundle identifies the exact contract, code, unit, `DAEMON_START` and battery result used, and names the residuals open at that digest (residual 7 among them). Qualification does not enable a unit; installing one stays the owner's decision.
