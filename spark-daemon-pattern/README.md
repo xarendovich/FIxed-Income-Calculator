@@ -1,25 +1,23 @@
-# Spark daemon pattern — v0.3 (r3) draft for review
+# Spark daemon pattern — contract 5.0.1 / r4.12
 
-- **Status:** DRAFT FOR ADJUDICATION. Nothing here is approved, installed or running anywhere. r3 is implemented and self-tested: 170 of 170 tests pass on Python 3.10, 3.11, 3.12 and 3.13, and all four reference daemons pass 18 of 18 battery checks on this workspace's kernel (Landlock ABI 7). That is evidence for the human's Class C ruling, not the ruling itself. Every PD (PD-01 to PD-31) is still PENDING until recorded in the decision log.
-- **r3.1 (2026-09-28):** cross-checked against the Spark handoffs (WBS 3.0 r3, 3.0C.1, 3.0A.2, 3.0E.1, WBS 2.5, Observer v0.2, the script board, H-Track, Kernel v0.2 Stage A). One Git code-execution path closed (HARDENING.md HF-24, contract 1.0.1); conformance gaps against WBS 3.0 r3 and PD-32 to PD-42 in `ADJUDICATION-SPARK-SOURCES.md`.
-- **r3.5 (2026-09-29):** a blind-period limit. A daemon that sees nothing it can accept (unsettled or failed cycles) for `blind_limit_seconds` stops with `SENSE_BLIND` (78) for a human, instead of pinging the watchdog over an empty ledger. The unit no longer restarts fail-closed exits (HF-28). Contract 2.0.0, manifest schema 2.
-- **r3.3 (2026-09-29):** reviewed the proposed plug-and-play contract stack (L0 component envelope and layers) against this pattern (`ADJUDICATION-PLUG-AND-PLAY.md`). The pattern is already a working L0 instance for resident components. The battery report now names the code it tested (HF-27). PD-46 to PD-52.
-- **r3 in one line:** a review that reproduced and fixed 22 defects, including two confinement escapes (`HARDENING.md`), plus a published, versioned daemon contract and a candidate handoff that carries no authority (`DAEMON-CONTRACT.md`).
-- **Revision:** r3, 2026-09-27 (see the revision history; r2 below for context). r2, 2026-09-27, drafted by Claude from Observer v0.3, the WBS 3.0 spec (r2), the Observer Improvement Proposal and the Spark Script Repository board. r2 adjudicates four external proposals (`ADJUDICATION-AP.md`, PD-15 to PD-20) plus two further ones submitted the same day (polling jitter and per-cycle GC forcing, PD-21 to PD-22), and implements the parts with a clear draft verdict: Landlock (AP-01), JCS key ordering (AP-03/J1), the 64 MB memory floor (IF-01/PD-20), polling jitter and GC forcing. The out-of-process supervisor/worker split (AP-04, S1-S7) stays a design only in `ADJUDICATION-AP.md` — none of it is built yet.
-- **Adjudicated by:**
-- **Adjudicated on:**
+- **Status:** SOFTWARE BASELINE CANDIDATE. The observe-only core is implemented and software-verified; DGX Spark / real-host-systemd qualification remains OPEN in `HARDWARE-GATE-DGX.md`.
+- **Current contract:** 5.0.1, `26e543fd8b36dd1d945be953c12d705c306adaa7cddf1cc2d24b893eff09dd16`, manifest schema `spark-daemon-manifest/4`. 5.0.1 is a wording-only consolidation of 5.0.0: it makes the ledger claim relative to the observed head, replaces the ambiguous current-use "Class C" label with "owner activation decision", records the sd_notify boundary, and corrects stale cycle-budget wording. It changes no enforcement rule.
+- **Scope:** one resident **observe-only** daemon pattern. A daemon reads only declared paths, writes only its output directory, has no network and runs no program. Landlock and the systemd unit are the enforcement boundary; purity and the audit hook remain diagnostics/tripwires.
+- **Authority:** a candidate and a report carry no authority. A qualifying battery PASS is evidence; installation/activation remains a separate owner decision. Nothing in this package installs or enables a unit.
+- **Evidence:** exact test counts belong to immutable evidence records rather than this README. See `VERIFICATION-V5.md`, `evidence/v5/`, and `ADVERSARIAL-REVIEW-HANDOFF-V5.md`. The current reference set is `meminfo-watch`, `disk-watch`, and `dir-watch`; `git-watch` left the generic core with full R-2.
+- **History:** r1-r4 review and adjudication files are retained as historical records. Historical counts, class labels, and pending decisions in those records are not the current contract; where prose conflicts with `spark-daemon describe` / `contract/*.json`, the published contract wins.
 
-A daemon built from this pattern has three parts. A **manifest** declares everything about its safety in a closed schema. A fixed **skeleton** supplies every safety mechanism, so the daemon's author writes only what to observe. A **conformance battery** runs the real daemon through eighteen checks before anyone may activate it. v1 admits only daemons that observe and record; nothing in this package installs, enables or starts a service, and `spark-new daemon` is deliberately not built yet.
+A daemon built from this pattern has three parts: a closed-schema **manifest**, deterministic observation code in `daemon.py`, and the fixed **skeleton** that provides confinement, lifecycle, the append-only ledger, verification, blindness handling, and the conformance battery. Contract 5.x admits only `daemon_class: observe`.
 
-Whoever writes a daemon, whether a person, a script or a model, builds against one published **contract** (`spark-daemon describe`, `contract/`) and hands back a **candidate** (`manifest.json`, `daemon.py`, `candidate.json`). A candidate carries no authority: validate and precheck are fast feedback, the battery's PASS is the only admissible evidence, and activation stays a human Class C decision (section 4, `DAEMON-CONTRACT.md`).
+Whoever writes a daemon — person, script, or model — builds against one published contract and hands back a candidate envelope. The producer may run precheck/validate/battery, but cannot certify or activate what it produced.
 
 ## What is in the folder
 
 ```text
 spark-daemon-pattern/
   ADJUDICATION-AP.md        draft adjudication of external proposals AP-01..AP-04 (r2)
-  HARDENING.md              r3 review: 22 reproduced defects, fixes, tests, residual risks
-  DAEMON-CONTRACT.md        r3 handoff design: contract, candidate envelope, evidence lanes, PD-23..PD-31
+  HARDENING.md              defect history HF-01..HF-44, fixes, regression evidence and residual risks
+  DAEMON-CONTRACT.md        current contract explainer plus the preserved historical r3 design record
   ADJUDICATION-SPARK-SOURCES.md  r3.1/r3.2 cross-check against the Spark handoffs (incl. WBS 3.1, 3.0 r4): PD-32..PD-45
   ADJUDICATION-PLUG-AND-PLAY.md  r3.3-r3.8 plug-and-play stack, framework/services boundary, kernel v2 agenda,
                             universal-contract alignment and U-1..U-7: PD-46..PD-68
@@ -95,7 +93,7 @@ spark-daemon-pattern/
     meminfo-watch/          GB10 unified-memory bands from /proc
     disk-watch/             free-space bands on the model-weights filesystem
     dir-watch/              inventory diff of a drop folder (names, sizes, mtimes)
-  tests/                    170 self-tests and 7 fixture daemons, some deliberately bad
+  tests/                    current self-tests and deliberately bad fixtures; exact run counts live in evidence/
   evidence/                 r2 battery report and self-test output; evidence/r3/ holds the r3 runs;
                             evidence/r3.8/ the start-up verification benchmark (U-6); evidence/r3.9/ the restart-loop reproduction (HF-32); evidence/r4.0/ the same after the fix; evidence/r4.3/ the dir-watch capped-listing reproduction (HF-33), before and after.
                             (r2 also listed evidence/ap/, which was not in the uploaded zip: HF-23)
