@@ -1,0 +1,27 @@
+# 2026-10-09T19:45:30Z at 752e41e, Python 3.11.15
+{
+ "A": {
+  "exit": 0,
+  "manifest_sha256": "0066a109b708ec938129f676d52311496d92db32e23cd89fc4aa8aa7fd24c82f",
+  "start_payload_mentions_home_or_paths": false,
+  "observed_events": [
+   [
+    "INBOX_BASELINE",
+    1
+   ]
+  ],
+  "stderr_tail": []
+ },
+ "B": {
+  "exit": 0,
+  "manifest_sha256": "0066a109b708ec938129f676d52311496d92db32e23cd89fc4aa8aa7fd24c82f",
+  "start_payload_mentions_home_or_paths": false,
+  "observed_events": [
+   [
+    "INBOX_BASELINE",
+    7
+   ]
+  ],
+  "stderr_tail": []
+ }
+}
