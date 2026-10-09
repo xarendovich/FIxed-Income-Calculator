@@ -180,7 +180,7 @@
       "type": "integer",
       "minimum": 5,
       "maximum": 1800,
-      "description": "The longest one whole cycle (sense, decide, digest) may take. Every ctx call gets what is left of it; at the budget the cycle fails. WatchdogSec = 2 x budget + 10, TimeoutStopSec = WatchdogSec + 10, TimeoutStartSec = max(60, WatchdogSec); at most half of blind_limit_seconds."
+      "description": "The longest one whole cycle (sense, decide, digest) may take. One runtime alarm enforces the whole-cycle deadline; at the budget the cycle fails. WatchdogSec = 2 x budget + 10, TimeoutStopSec = WatchdogSec + 10, TimeoutStartSec = max(60, WatchdogSec); at most half of blind_limit_seconds."
     },
     "blind_limit_seconds": {
       "type": "integer",
