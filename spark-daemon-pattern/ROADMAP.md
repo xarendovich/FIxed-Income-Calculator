@@ -1,5 +1,7 @@
 # Roadmap: what remains, and the kernel v2 track
 
+> **Closed to growth, 2026-10-09.** The architecture is complete at 5.0.0. `CLOSEOUT-V5.md` holds the review of Kernel-Update PR 2, the closing rule (four kinds of change only), the live/record/candidate index and the owner's exit list. This roadmap stays as the ordered list of what remains; nothing is added to it.
+
 - **As of:** 2026-10-08, contract 5.0.0 at `6aa8671` (HF-43/44 fixed, verification pass done).
 - **Sources.** This repository (the pattern) and, since 2026-10-08, the kernel repository `xarendovich/Kernel-Update` at `ddec911` (2026-10-06, "Merge pull request #2"), read in full: its README, the 2026-10-04 review register (KU-01..31, V-01..12, gates A to E), the 2026-10-06 owner direction (KU-32), `spec/next/`, and `spec/historical/`. §3 and §4 are written from that source. Under the kernel's SP-10 rule no model session reads `~/spark-core`; nothing here does.
 
