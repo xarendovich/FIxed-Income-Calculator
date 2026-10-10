@@ -89,6 +89,21 @@ class AgreementTests(unittest.TestCase):
             self.assertTrue(policy.resolve("~/x").startswith(os.path.realpath(self.home)))
             self.assertTrue(policy.output_dir.startswith(os.path.realpath(self.home)))
 
+    def test_resolved_policy_evidence_is_closed_absolute_and_exactly_from_the_instance(self):
+        path = os.path.join(ROOT, "examples", "dir-watch", "manifest.json")
+        m = manifest.load(path)
+        policy = PathPolicy.of(m, home=self.home)
+        evidence = policy.to_evidence()
+        self.assertEqual(set(evidence), {"home", "reads", "output_dir", "deny"})
+        self.assertEqual(evidence["home"], policy.home)
+        self.assertEqual(evidence["reads"], sorted(policy.reads))
+        self.assertEqual(evidence["output_dir"], policy.output_dir)
+        self.assertEqual(evidence["deny"], sorted(policy.deny))
+        for value in [evidence["home"], evidence["output_dir"], *evidence["reads"], *evidence["deny"]]:
+            self.assertTrue(os.path.isabs(value))
+            self.assertNotIn("~", value)
+        self.assertNotIn("landlock_abi", evidence)
+
 
 if __name__ == "__main__":
     unittest.main()
