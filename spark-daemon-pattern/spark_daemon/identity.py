@@ -187,7 +187,7 @@ def execution_environment_problems(env=None, *, isolated=None) -> tuple:
     returned or logged.
     """
     source = os.environ if env is None else env
-    problems = [name for name in FORBIDDEN_EXEC_ENV if source.get(name)]
+    problems = [name for name in FORBIDDEN_EXEC_ENV if name in source]
     is_isolated = bool(sys.flags.isolated) if isolated is None else bool(isolated)
     if not is_isolated:
         problems.append("PYTHON_NOT_ISOLATED")
