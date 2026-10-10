@@ -61,6 +61,20 @@ class PathPolicy:
     def may_write(self, full: str) -> bool:
         return within(full, self.output_dir) and not self.denied(full)
 
+    def to_evidence(self) -> dict:
+        """Closed runtime-binding receipt for the exact policy this instance enforces.
+
+        It contains resolved absolute paths only. The original tilde-form declaration is already
+        bound by manifest_sha256. Landlock ABI/status/gaps are separate enforcement evidence and
+        deliberately do not appear here.
+        """
+        return {
+            "home": self.home,
+            "reads": sorted(self.reads),
+            "output_dir": self.output_dir,
+            "deny": sorted(self.deny),
+        }
+
 
 # ---- the kernel and unit projections. They read only output_dir, reads and deny, so anything
 # with those three attributes (guard.Policy, a test's stand-in) projects the same way.
